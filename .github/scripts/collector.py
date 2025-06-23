@@ -28,8 +28,7 @@ TARGET_REPO = "hehonghui/awesome-english-ebooks"
 MAGAZINES = {
     "economist": {"folder": "The Economist", "pattern": r"economist.*\.(epub|pdf)"},
     "wired": {"folder": "Wired", "pattern": r"wired.*\.(epub|pdf)"},
-    "atlantic": {"folder": "The Atlantic", "pattern": r"atlantic.*\.(epub|pdf)"},
-}
+    "atlantic": {"folder": "The Atlantic", "pattern": r"atlantic.*\.(epub|pdf)"}, # 保证这里的逗号存在
 }
 TOPICS_KEYWORDS = {
     "technology": ["tech", "technology", "ai", "artificial intelligence", "digital", "software", "hardware", "computer", "internet", "cyber", "machine learning", "blockchain", "data", "algorithm"],
@@ -131,9 +130,7 @@ def save_articles(magazine_name, classified_articles):
 
 def generate_website():
     """生成GitHub Pages网站"""
-    # 确保目录存在
     WEBSITE_DIR.mkdir(exist_ok=True)
-
     index_template_str = """
     <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>杂志文章收集器</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -146,7 +143,6 @@ def generate_website():
     <div class="card-footer bg-transparent border-top-0"><a href="{{ article.url }}" class="btn btn-sm btn-outline-primary">阅读全文</a>
     <small class="text-muted float-end">{{ article.date }}</small></div></div></div>{% endfor %}</div></div></body></html>
     """
-    
     articles_data = []
     topic_names = {"technology": "科技", "finance": "金融", "science": "科学", "world_affairs": "世界局势"}
 
@@ -160,13 +156,11 @@ def generate_website():
                 title, article_content = article_sections[i], article_sections[i+1]
                 article_filename = f"{md_file.stem}_{i//2}.html"
                 article_path = WEBSITE_DIR / article_filename
-                
                 article_html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{title}</title>
                 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
                 <style>body{{padding:30px;max-width:800px;margin:0 auto;line-height:1.7;}}</style></head>
                 <body><nav><a href="index.html">返回首页</a></nav><h1 class="my-4">{title}</h1><div>{markdown2.markdown(article_content)}</div></body></html>"""
                 article_path.write_text(article_html, encoding='utf-8')
-                
                 articles_data.append({
                     "title": title, "preview": re.sub(r'\s+', ' ', article_content[:150]), "url": article_filename,
                     "topic": topic_dir.name, "magazine": magazine, "date": md_file.stem.split('_')[-1]
@@ -187,24 +181,19 @@ def main():
     """主函数"""
     logger.info("开始运行杂志收集器")
     setup_storage()
-    
     has_downloaded_new = False
     for magazine_name, info in MAGAZINES.items():
         logger.info(f"处理 {magazine_name} 杂志")
         file_path = download_magazine(magazine_name, info["pattern"])
         if not file_path: continue
-
         text_content = ""
         if file_path.endswith(".epub"): text_content = extract_text_from_epub(file_path)
         elif file_path.endswith(".pdf"): text_content = extract_text_from_pdf(file_path)
-        
         if text_content:
             classified_articles = classify_text(text_content)
             if save_articles(magazine_name, classified_articles):
                 has_downloaded_new = True
-        
         os.remove(file_path)
-
     logger.info("开始生成网站，使用所有已存在的文章。")
     generate_website()
 
