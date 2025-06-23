@@ -508,10 +508,6 @@ def main():
     # 创建存储结构
     setup_storage()
     
-    # 检查仓库更新
-    if not check_repo_updates() and not os.path.exists("FORCE_UPDATE"):
-        logger.info("目标仓库没有最近更新，无需处理")
-        return
     
     magazine_results = {}
     
