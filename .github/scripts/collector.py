@@ -28,7 +28,7 @@ TARGET_REPO = "hehonghui/awesome-english-ebooks"
 MAGAZINES = {
     "economist": {"folder": "The Economist", "pattern": r"economist.*\.(epub|pdf)"},
     "wired": {"folder": "Wired", "pattern": r"wired.*\.(epub|pdf)"},
-    "atlantic": {"folder": "The Atlantic", "pattern": r"atlantic.*\.(epub|pdf)"}
+    "atlantic": {"folder": "The Atlantic", "pattern": r"atlantic.*\.(epub|pdf)"},
 }
 }
 TOPICS_KEYWORDS = {
