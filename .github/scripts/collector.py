@@ -25,10 +25,11 @@ load_dotenv()
 
 # 配置
 TARGET_REPO = "hehonghui/awesome-english-ebooks"
+# 把旧的 MAGAZINES 字典替换成下面这个最终版
 MAGAZINES = {
-    "economist": {"folder": "The Economist", "pattern": r"economist.*\.(epub|pdf)"},
-    "wired": {"folder": "Wired", "pattern": r"wired.*\.(epub|pdf)"},
-    "atlantic": {"folder": "The Atlantic", "pattern": r"atlantic.*\.(epub|pdf)"}, # 保证这里的逗号存在
+    "economist": {"folder": "01_economist", "pattern": r".*(economist|Economist).*\.(epub|pdf)"},
+    "wired": {"folder": "05_wired", "pattern": r".*(wired|Wired).*\.(epub|pdf)"},
+    "atlantic": {"folder": "04_atlantic", "pattern": r".*(atlantic|Atlantic).*\.(epub|pdf)"},
 }
 TOPICS_KEYWORDS = {
     "technology": ["tech", "technology", "ai", "artificial intelligence", "digital", "software", "hardware", "computer", "internet", "cyber", "machine learning", "blockchain", "data", "algorithm"],
