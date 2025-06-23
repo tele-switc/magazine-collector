@@ -354,11 +354,9 @@ def main():
         
         os.remove(file_path)
 
-    if has_new_content:
-        logger.info("检测到新内容，开始生成网站。")
-        generate_website()
-    else:
-        logger.warning("本次运行没有收集到任何新文章，不生成网站。")
+# 我们暂时不关心有没有新内容，总是尝试生成网站
+logger.info("无论是否有新内容，都尝试根据现有文章生成网站。")
+generate_website()
 
 
 if __name__ == "__main__":
