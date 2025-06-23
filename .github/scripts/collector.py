@@ -3,7 +3,7 @@ import re
 import json
 import requests
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import ebooklib
 from ebooklib import epub
@@ -83,7 +83,8 @@ def check_repo_updates():
     
     for commit in latest_commits:
         commit_date = commit.commit.author.date
-        if (datetime.now() - commit_date).days <= 2:  # 检查最近2天的更新
+        # 使用 timezone.utc 来获取一个带时区的当前时间
+        if (datetime.now(timezone.utc) - commit_date).days <= 2:  # 检查最近2天的更新
             recent_updated = True
             logger.info(f"仓库最近有更新: {commit.commit.message}")
             
