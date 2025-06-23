@@ -1,0 +1,43 @@
+name: Magazine Article Collector
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # 每天UTC时间0点运行(对应北京时间早上8点)
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 ebooklib pdfplumber nltk PyGithub python-dotenv markdown2 jinja2
+          python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
+      
+      - name: Run magazine collector script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: python ./.github/scripts/collector.py
+        
+      - name: Update repository with new content
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add ./articles ./docs
+          git commit -m "Update articles $(date +'%Y-%m-%d')" || echo "No changes to commit"
+          git push
+          
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: docs
+          branch: gh-pages
