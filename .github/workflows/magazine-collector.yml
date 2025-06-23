@@ -3,8 +3,8 @@ name: Magazine Article Collector
 on:
   schedule:
     - cron: '0 0 * * *'  # 每天UTC时间0点运行(对应北京时间早上8点)
-  workflow_dispatch:  # 允许手动触发
-  push:                  # 新增：当有代码推送到 main 分支时触发
+  workflow_dispatch:     # 允许手动触发
+  push:                  # 当有代码推送到 main 分支时触发
     branches:
       - main
 
@@ -12,7 +12,7 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     
-    # 赋予工作流对仓库的读写权限，解决403错误
+    # 赋予工作流对仓库的读写权限，解决权限问题
     permissions:
       contents: write
       pages: write
@@ -20,10 +20,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4 # 更新到v4
+        uses: actions/checkout@v4
         
       - name: Set up Python
-        uses: actions/setup-python@v4 # 更新到v4
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
           
@@ -34,32 +34,31 @@ jobs:
           python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
       
       - name: Run magazine collector script
-        id: script-run # 给脚本运行步骤一个ID，方便后续引用
+        id: script-run # 给脚本运行步骤一个ID
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         run: python ./.github/scripts/collector.py
       
-      # ============ 终极调试“摄像头” ============
-      # 无论上一步是否成功，都运行此步骤，列出所有生成的文件
+      # ============ 调试步骤“摄像头” ============
       - name: DEBUG - List all generated files
-        if: always()
+        if: always() # 确保此步骤总是运行
         run: ls -R
 
       - name: Update repository with new content
         run: |
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "action@github.com"
-          # 只添加 articles 文件夹的变化
-          if [ -d "articles" ]; then
+          # 检查 articles 目录是否存在并且有新内容
+          if [ -d "articles" ] && ! git diff --quiet ./articles; then
             git add ./articles
-            git commit -m "Update articles $(date +'%Y-%m-%d')" || echo "No new articles to commit"
+            git commit -m "Update articles $(date +'%Y-%m-%d')"
             git push
           else
-            echo "Articles directory not found. Skipping commit."
+            echo "No new articles to commit, or articles directory does not exist."
           fi
           
       - name: Deploy to GitHub Pages
-        # 仅在脚本成功生成内容时运行 (通过检查 docs 目录是否存在)
+        # 仅在脚本成功并且 docs 目录非空时运行
         if: steps.script-run.conclusion == 'success' && hashFiles('docs/**') != ''
         uses: JamesIves/github-pages-deploy-action@v4
         with:
