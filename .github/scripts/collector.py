@@ -215,6 +215,9 @@ def save_articles(magazine_name, classified_articles):
 
 def generate_website():
     """生成GitHub Pages网站"""
+
+    os.makedirs(WEBSITE_DIR, exist_ok=True)
+    
     index_template = """
     <!DOCTYPE html>
     <html lang="en">
