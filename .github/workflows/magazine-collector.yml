@@ -8,12 +8,19 @@ on:
 jobs:
   collect:
     runs-on: ubuntu-latest
+    
+    # 赋予工作流对仓库的读写权限，解决403错误
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # 更新到v4
         
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v4 # 更新到v4
         with:
           python-version: '3.10'
           
@@ -24,20 +31,34 @@ jobs:
           python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
       
       - name: Run magazine collector script
+        id: script-run # 给脚本运行步骤一个ID，方便后续引用
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         run: python ./.github/scripts/collector.py
-        
+      
+      # ============ 终极调试“摄像头” ============
+      # 无论上一步是否成功，都运行此步骤，列出所有生成的文件
+      - name: DEBUG - List all generated files
+        if: always()
+        run: ls -R
+
       - name: Update repository with new content
         run: |
-          git config --global user.name "GitHub Action"
+          git config --global user.name "GitHub Action Bot"
           git config --global user.email "action@github.com"
-          git add ./articles ./docs
-          git commit -m "Update articles $(date +'%Y-%m-%d')" || echo "No changes to commit"
-          git push
+          # 只添加 articles 文件夹的变化
+          if [ -d "articles" ]; then
+            git add ./articles
+            git commit -m "Update articles $(date +'%Y-%m-%d')" || echo "No new articles to commit"
+            git push
+          else
+            echo "Articles directory not found. Skipping commit."
+          fi
           
       - name: Deploy to GitHub Pages
+        # 仅在脚本成功生成内容时运行 (通过检查 docs 目录是否存在)
+        if: steps.script-run.conclusion == 'success' && hashFiles('docs/**') != ''
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: docs
-          branch: gh-pages
+          folder: docs # 部署 docs 文件夹
+          branch: gh-pages # 部署到 gh-pages 分支
