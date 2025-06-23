@@ -26,9 +26,10 @@ load_dotenv()
 # 配置
 TARGET_REPO = "hehonghui/awesome-english-ebooks"
 MAGAZINES = {
-    "economist": {"folder": "01_economist", "pattern": r"economist.*\.(epub|pdf)"},
-    "wired": {"folder": "02_wired", "pattern": r"wired.*\.(epub|pdf)"},
-    "atlantic": {"folder": "03_atlantic", "pattern": r"atlantic.*\.(epub|pdf)"}
+    "economist": {"folder": "The Economist", "pattern": r"economist.*\.(epub|pdf)"},
+    "wired": {"folder": "Wired", "pattern": r"wired.*\.(epub|pdf)"},
+    "atlantic": {"folder": "The Atlantic", "pattern": r"atlantic.*\.(epub|pdf)"}
+}
 }
 TOPICS_KEYWORDS = {
     "technology": ["tech", "technology", "ai", "artificial intelligence", "digital", "software", "hardware", "computer", "internet", "cyber", "machine learning", "blockchain", "data", "algorithm"],
