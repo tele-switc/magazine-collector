@@ -57,10 +57,12 @@ jobs:
             echo "No new articles to commit, or articles directory does not exist."
           fi
           
+        
       - name: Deploy to GitHub Pages
-        # 仅在脚本成功并且 docs 目录非空时运行
-        if: steps.script-run.conclusion == 'success' && hashFiles('docs/**') != ''
+        if: always() # 暂时改成 always() 来确保无论如何都运行部署
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: docs # 部署 docs 文件夹
-          branch: gh-pages # 部署到 gh-pages 分支
+      folder: docs
+      branch: gh-pages
+      force: true # <-- 新增：强制推送，覆盖 gh-pages 分支
+      clean: true # <-- 新增：部署前先清空旧文件，确保干净
