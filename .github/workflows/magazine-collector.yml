@@ -2,17 +2,15 @@ name: Magazine Article Collector
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 每天UTC时间0点运行(对应北京时间早上8点)
-  workflow_dispatch:     # 允许手动触发
-  push:                  # 当有代码推送到 main 分支时触发
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+  push:
     branches:
       - main
 
 jobs:
   collect:
     runs-on: ubuntu-latest
-    
-    # 赋予工作流对仓库的读写权限，解决权限问题
     permissions:
       contents: write
       pages: write
@@ -21,34 +19,32 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-          
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 ebooklib pdfplumber nltk PyGithub python-dotenv markdown2 jinja2
           python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
-      
+
       - name: Run magazine collector script
-        id: script-run # 给脚本运行步骤一个ID
+        id: script-run
         env:
           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         run: python ./.github/scripts/collector.py
-      
-      # ============ 调试步骤“摄像头” ============
+
       - name: DEBUG - List all generated files
-        if: always() # 确保此步骤总是运行
+        if: always()
         run: ls -R
 
       - name: Update repository with new content
         run: |
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "action@github.com"
-          # 检查 articles 目录是否存在并且有新内容
           if [ -d "articles" ] && ! git diff --quiet ./articles; then
             git add ./articles
             git commit -m "Update articles $(date +'%Y-%m-%d')"
@@ -56,13 +52,12 @@ jobs:
           else
             echo "No new articles to commit, or articles directory does not exist."
           fi
-          
-        
+
       - name: Deploy to GitHub Pages
-        if: always() # 暂时改成 always() 来确保无论如何都运行部署
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-      folder: docs
-      branch: gh-pages
-      force: true # <-- 新增：强制推送，覆盖 gh-pages 分支
-      clean: true # <-- 新增：部署前先清空旧文件，确保干净
+          folder: docs
+          # 我们不需要 force 和 clean，因为 if 条件会帮我们判断
+          # 只有在 docs 文件夹非空时，这个步骤才会运行
+          # 这可以确保每次部署都是有意义的
+          if: hashFiles('docs/**') != ''
