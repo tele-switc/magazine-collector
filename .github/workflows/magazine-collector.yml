@@ -53,11 +53,11 @@ jobs:
             echo "No new articles to commit, or articles directory does not exist."
           fi
 
+      # ↓↓↓↓↓↓ 这是最终修正版，注意 if 的位置 ↓↓↓↓↓↓
       - name: Deploy to GitHub Pages
+        if: hashFiles('docs/**') != '' # if 和 name, uses 平级
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: docs
-          # 我们不需要 force 和 clean，因为 if 条件会帮我们判断
-          # 只有在 docs 文件夹非空时，这个步骤才会运行
-          # 这可以确保每次部署都是有意义的
-          if: hashFiles('docs/**') != ''
+          folder: docs # with 下面只保留 action 自己的参数
+          branch: gh-pages
+      # ↑↑↑↑↑↑ 这是最终修正版，注意 if 的位置 ↑↑↑↑↑↑
