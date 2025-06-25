@@ -1,6 +1,5 @@
 import os
 import re
-import shutil
 from pathlib import Path
 import ebooklib
 from ebooklib import epub
@@ -9,17 +8,19 @@ from bs4 import BeautifulSoup
 import logging
 import markdown2
 import jinja2
+import nltk
 
-# 配置
+# 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# 源仓库在本地的路径
+# 配置
+# 源仓库在本地的路径 (由 a.yml 文件中的 git clone 命令创建)
 SOURCE_REPO_PATH = Path("source_repo")
 MAGAZINES = {
-    "economist": {"folder": "01_economist", "pattern": r"economist.*(\d{4}[-.]\d{2}[-.]\d{2}).*\.(epub|pdf)", "topic": "world_affairs"},
-    "wired": {"folder": "05_wired", "pattern": r"wired.*(\d{4}[-.]\d{2}[-.]\d{2}).*\.(epub|pdf)", "topic": "technology"},
-    "atlantic": {"folder": "04_atlantic", "pattern": r"atlantic.*(\d{4}[-.]\d{2}[-.]\d{2}).*\.(epub|pdf)", "topic": "world_affairs"}
+    "economist": {"folder": "01_economist", "pattern": r"economist.*(\d{4}[-.]\d{2}[-.]\d{2}).*\.epub", "topic": "world_affairs"},
+    "wired": {"folder": "05_wired", "pattern": r"wired.*(\d{4}[-.]\d{2}[-.]\d{2}).*\.epub", "topic": "technology"},
+    "atlantic": {"folder": "04_atlantic", "pattern": r"atlantic.*(\d{4}[-.]\d{2}[-.]\d{2}).*\.epub", "topic": "world_affairs"}
 }
 ARTICLES_DIR = Path("articles")
 WEBSITE_DIR = Path("docs")
@@ -34,8 +35,18 @@ def setup_storage():
 def find_and_process_magazines():
     """在本地克隆的仓库中查找并处理文件"""
     if not SOURCE_REPO_PATH.is_dir():
-        logger.error(f"源仓库目录 '{SOURCE_REPO_PATH}' 不存在！")
+        logger.error(f"源仓库目录 '{SOURCE_REPO_PATH}' 不存在！脚本将退出。")
         return
+
+    # 下载 nltk 数据
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        nltk.download('stopwords')
 
     for magazine_name, info in MAGAZINES.items():
         logger.info(f"--- 开始处理 {magazine_name} ---")
@@ -64,8 +75,9 @@ def find_and_process_magazines():
                 text_content = ""
                 if file_path.suffix == ".epub":
                     text_content = extract_text_from_epub(str(file_path))
-                elif file_path.suffix == ".pdf":
-                    text_content = extract_text_from_pdf(str(file_path))
+                # 暂时移除PDF处理，因为它可能非常慢或出错
+                # elif file_path.suffix == ".pdf":
+                #     text_content = extract_text_from_pdf(str(file_path))
 
                 if text_content:
                     save_article(output_path, text_content, magazine_name.capitalize(), topic.capitalize(), date_str)
@@ -76,14 +88,6 @@ def extract_text_from_epub(epub_path):
         return "\n".join(BeautifulSoup(item.get_content(), 'html.parser').get_text() for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
     except Exception as e:
         logger.error(f"提取EPUB失败 {epub_path}: {e}")
-        return ""
-
-def extract_text_from_pdf(pdf_path):
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            return "\n".join(page.extract_text() for page in pdf.pages if page.extract_text())
-    except Exception as e:
-        logger.error(f"提取PDF失败 {pdf_path}: {e}")
         return ""
 
 def save_article(output_path, text_content, magazine_title, topic_title, date_str):
