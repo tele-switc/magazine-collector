@@ -20,6 +20,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 新增步骤：直接克隆目标仓库到名为 source_repo 的文件夹
+      - name: Clone source repository
+        run: git clone --depth 1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -28,13 +32,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 ebooklib pdfplumber nltk PyGithub python-dotenv markdown2 jinja2
-          python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
+          # 不再需要 PyGithub 和 python-dotenv
+          pip install requests beautifulsoup4 ebooklib pdfplumber nltk markdown2 jinja2
 
       - name: Run magazine collector script
         id: script-run
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        # 不再需要 GITHUB_TOKEN
         run: python ./.github/scripts/collector.py
 
       - name: DEBUG - List all generated files
@@ -45,19 +48,17 @@ jobs:
         run: |
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "action@github.com"
-          if [ -d "articles" ] && ! git diff --quiet ./articles; then
+          if ! git diff --quiet ./articles; then
             git add ./articles
             git commit -m "Update articles $(date +'%Y-%m-%d')"
             git push
           else
-            echo "No new articles to commit, or articles directory does not exist."
+            echo "No new articles to commit."
           fi
-
-      # ↓↓↓↓↓↓ 这是最终修正版，注意 if 的位置 ↓↓↓↓↓↓
+          
       - name: Deploy to GitHub Pages
-        if: hashFiles('docs/**') != '' # if 和 name, uses 平级
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: docs # with 下面只保留 action 自己的参数
           branch: gh-pages
-      # ↑↑↑↑↑↑ 这是最终修正版，注意 if 的位置 ↑↑↑↑↑↑
+          folder: docs
+          clean: true
