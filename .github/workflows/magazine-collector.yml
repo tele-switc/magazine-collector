@@ -2,68 +2,56 @@ name: Magazine Article Collector
 
 on:
   schedule:
-    - cron: '0 0 * * *' # 每天UTC时间0点运行(对应北京时间早上8点)
-  workflow_dispatch:    # 允许手动触发
+    - cron: '0 0 * * *'
+  workflow_dispatch:
   push:
     branches:
       - main
 
 jobs:
-  collect:
+  build: # 我们把任务名从 collect 改为 build，更符合语义
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤 1: 直接克隆目标仓库到名为 source_repo 的文件夹
       - name: Clone source repository
         run: git clone --depth 1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo
 
-      # 步骤 2: 设置 Python 环境
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      # 步骤 3: 安装所有真正需要的依赖
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install beautifulsoup4 ebooklib pdfplumber nltk markdown2 jinja2
 
-      # 步骤 4: 运行已经清理干净的 Python 脚本
       - name: Run magazine collector script
-        id: script-run
         run: python ./.github/scripts/collector.py
 
-      # 步骤 5: 调试，查看生成了哪些文件
       - name: DEBUG - List all generated files
         if: always()
         run: ls -R
 
-      # 步骤 6: 提交新生成的文章到 main 分支
-      - name: Update repository with new content
-        run: |
-          git config --global user.name "GitHub Action Bot"
-          git config --global user.email "action@github.com"
-          # 检查 articles 文件夹是否有变化
-          if ! git diff --quiet ./articles; then
-            git add ./articles
-            git commit -m "Update articles $(date +'%Y-%m-%d')"
-            git push
-          else
-            echo "No new articles to commit."
-          fi
-          
-      # 步骤 7: 将生成的网站部署到 GitHub Pages
-      - name: Deploy to GitHub Pages
-        uses: JamesIves/github-pages-deploy-action@v4
+      # 官方部署步骤 1: 将生成的 docs 文件夹打包成一个 "artifact"
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          branch: gh-pages
-          folder: docs
-          clean: true # 部署前清空旧文件，确保部署是干净的
+          path: ./docs
+
+  deploy: # 新增一个专门用于部署的 job
+    needs: build # 确保 build 任务成功后才运行
+    permissions:
+      pages: write      # 允许向 GitHub Pages 写入
+      id-token: write   # 允许 OIDC 认证
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }} # 设置部署环境的URL
+    runs-on: ubuntu-latest
+    steps:
+      # 官方部署步骤 2: 从 "artifact" 部署到 GitHub Pages
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
