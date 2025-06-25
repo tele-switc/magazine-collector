@@ -25,23 +25,18 @@ ARTICLES_DIR = Path("articles")
 WEBSITE_DIR = Path("docs")
 
 def setup_directories():
-    """创建所有需要的目录"""
     ARTICLES_DIR.mkdir(exist_ok=True)
     WEBSITE_DIR.mkdir(exist_ok=True)
     for info in MAGAZINES.values():
         (ARTICLES_DIR / info['topic']).mkdir(exist_ok=True)
 
 def process_all_magazines():
-    """遍历、下载、处理所有在目标仓库中能找到的杂志文件"""
     if not SOURCE_REPO_PATH.is_dir():
         logger.error(f"源仓库目录 '{SOURCE_REPO_PATH}' 未找到!")
         return
 
-    # 下载 NLTK 数据
-    try:
-        nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        nltk.download('punkt')
+    try: nltk.data.find('tokenizers/punkt')
+    except LookupError: nltk.download('punkt')
 
     for magazine_name, info in MAGAZINES.items():
         source_folder = SOURCE_REPO_PATH / info["folder"]
@@ -52,17 +47,14 @@ def process_all_magazines():
             logger.warning(f"找不到目录: {source_folder}")
             continue
 
-        for file_path in source_folder.iterdir():
-            # 简化匹配逻辑：只要文件名包含杂志名，并且是 epub 格式
-            if magazine_name in file_path.name.lower() and file_path.suffix == '.epub':
-                
-                # 用文件名本身作为唯一ID，避免日期解析问题
+        # 使用 rglob 进行递归扫描，查找所有 .epub 文件
+        for file_path in source_folder.rglob('*.epub'):
+            # 简化匹配逻辑：只要文件名包含杂志名
+            if magazine_name in file_path.name.lower():
                 output_filename = f"{file_path.stem}.md"
                 output_path = ARTICLES_DIR / topic / output_filename
 
-                # 如果处理过的文件已存在，则跳过
-                if output_path.exists():
-                    continue
+                if output_path.exists(): continue
 
                 logger.info(f"发现并处理新文件: {file_path.name}")
                 
@@ -87,7 +79,6 @@ def save_article(output_path, text_content, title):
     logger.info(f"已保存文章到 {output_path}")
 
 def generate_website():
-    """根据所有已有的 .md 文件生成网站"""
     WEBSITE_DIR.mkdir(exist_ok=True)
     index_template_str = """
     <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>文章收集器</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head>
@@ -105,7 +96,6 @@ def generate_website():
                 "url": f"{md_file.stem}.html",
                 "topic": topic_dir.name.capitalize()
             })
-            # 同时生成单独的 HTML 页面
             with md_file.open('r', encoding='utf-8') as f: content = f.read()
             article_html_path = WEBSITE_DIR / f"{md_file.stem}.html"
             article_html = f'<!DOCTYPE html><html><head><title>{md_file.stem}</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"><style>body{{padding:30px;max-width:800px;margin:0 auto;}}</style></head><body>{markdown2.markdown(content)}<hr/><a href="index.html">返回列表</a></body></html>'
@@ -117,10 +107,8 @@ def generate_website():
     (WEBSITE_DIR / "index.html").write_text(index_html, encoding='utf-8')
     (WEBSITE_DIR / ".nojekyll").touch()
 
-    if articles_data:
-        logger.info(f"网站生成完成，包含 {len(articles_data)} 篇文章。")
-    else:
-        logger.info("网站生成完成，但没有找到任何文章。")
+    if articles_data: logger.info(f"网站生成完成，包含 {len(articles_data)} 篇文章。")
+    else: logger.info("网站生成完成，但没有找到任何文章。")
 
 if __name__ == "__main__":
     setup_directories()
