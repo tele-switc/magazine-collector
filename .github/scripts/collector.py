@@ -1,4 +1,6 @@
-name: Magazine Article Collector
+import os
+import re
+import requests
 
 on:
   schedule:
