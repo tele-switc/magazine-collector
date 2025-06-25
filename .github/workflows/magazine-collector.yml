@@ -2,14 +2,14 @@ name: Magazine Article Collector
 
 on:
   schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
+    - cron: '0 0 * * *' # 每天UTC时间0点运行(对应北京时间早上8点)
+  workflow_dispatch:    # 允许手动触发
   push:
     branches:
       - main
 
 jobs:
-  build: # 我们把任务名从 collect 改为 build，更符合语义
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -35,23 +35,21 @@ jobs:
         if: always()
         run: ls -R
 
-      # 官方部署步骤 1: 将生成的 docs 文件夹打包成一个 "artifact"
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./docs
 
-  deploy: # 新增一个专门用于部署的 job
-    needs: build # 确保 build 任务成功后才运行
+  deploy:
+    needs: build
     permissions:
-      pages: write      # 允许向 GitHub Pages 写入
-      id-token: write   # 允许 OIDC 认证
+      pages: write
+      id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }} # 设置部署环境的URL
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      # 官方部署步骤 2: 从 "artifact" 部署到 GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
