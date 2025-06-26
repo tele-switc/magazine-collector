@@ -56,8 +56,7 @@ def split_text_into_articles(text):
 
 def generate_title_from_content(text_content, all_texts_corpus):
     try:
-        stop_words = list(stopwords.words('english'))
-        stop_words.extend(['would', 'could', 'said', 'also', 'like', 'get', 'one', 'two', 'told', 'mr', 'ms'])
+        stop_words = list(stopwords.words('english')); stop_words.extend(['would', 'could', 'said', 'also', 'like', 'get', 'one', 'two', 'told', 'mr', 'ms'])
         vectorizer = TfidfVectorizer(max_features=20, stop_words=stop_words, ngram_range=(1, 2), token_pattern=r'(?u)\b[a-zA-Z-]{3,}\b')
         vectorizer.fit(all_texts_corpus)
         response = vectorizer.transform([text_content])
@@ -123,11 +122,7 @@ def save_article(output_path, text_content, title, author):
     logger.info(f"已保存: {output_path.name}")
 
 def generate_website():
-    """【最终艺术品版】"""
     WEBSITE_DIR.mkdir(exist_ok=True)
-    # 注入 particles.js 库
-    particles_js_url = "https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"
-    # 主页模板
     index_template_str = """
     <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Curated Journals</title><link rel="preconnect" href="https://fonts.googleapis.com">
@@ -135,35 +130,95 @@ def generate_website():
     <style>
         :root { --accent-color: #33a0ff; --bg-color: #0d1117; --card-color: #161b22; --text-color: #c9d1d9; 
                 --secondary-text: #8b949e; --border-color: rgba(139, 148, 158, 0.2); }
-        body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 4rem 2rem; }
-        #particles-js { position: fixed; width: 100%; height: 100%; top: 0; left: 0; z-index: 0; }
-        .content-wrapper { position: relative; z-index: 1; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 4rem 2rem;
+               background-image: radial-gradient(var(--secondary-text) 1px, transparent 0); background-size: 40px 40px; }
         .container { max-width: 1320px; margin: 0 auto; }
-        .header h1 { font-size: 5rem; text-align: center; margin-bottom: 4rem; color: #fff; }
-        .grid { display: grid; gap: 2.5rem; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+        .header { text-align: center; margin-bottom: 5rem; }
+        .header h1 { font-size: 5rem; font-weight: 700; color: #fff; margin: 0; letter-spacing: -2px; }
+        .header p { font-size: 1.25rem; color: var(--secondary-text); margin-top: 0.5rem; }
+        .grid { display: grid; gap: 2rem; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
         .card { background: var(--card-color); border: 1px solid var(--border-color); border-radius: 16px;
-                transition: all 0.3s ease; display: flex; flex-direction: column; }
+                transition: transform 0.3s ease, box-shadow 0.3s ease; display: flex; flex-direction: column; }
         .card:hover { transform: translateY(-8px); box-shadow: 0 0 30px rgba(51, 160, 255, 0.2); border-color: var(--accent-color); }
         .card-content { padding: 2rem; flex-grow: 1; } .card-title { font-size: 1.5rem; margin: 0 0 1rem 0; color: #fff; }
         .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 1.5rem; margin-top: auto; border-top: 1px solid var(--border-color); }
+        .meta-info { font-size: 0.85rem; color: #8e8e8e; }
+        .read-more-btn { font-size: 0.9rem; font-weight: 500; color: #fff; border: 1px solid var(--accent-color);
+                         padding: 0.8rem 1.6rem; border-radius: 12px; text-decoration: none; transition: all 0.2s ease; }
+        .read-more-btn:hover { background-color: var(--accent-color); color: var(--bg-color); }
     </style></head>
-    <body><div id="particles-js"></div><div class="content-wrapper"><div class="container">
-        <div class="header"><h1>AI Curated Journals</h1></div><div class="grid">
+    <body><div class="container">
+        <div class="header"><h1>AI Curated Journals</h1><p>Intelligently curated articles from the world's leading journals.</p></div>
+        <div class="grid">
         {% for article in articles %}
-            <div class="card"><div class="card-content">
-                <h5 class="card-title">{{ article.title }}</h5>
-                <div class="card-footer"><span>By {{ article.author }}</span><a href="{{ article.url }}" style="color:var(--accent-color);">Read →</a></div>
-            </div></div>
+            <div class="card">
+                <div class="card-content">
+                    <h5 class="card-title">{{ article.title }}</h5>
+                    <div class="card-footer">
+                        <span class="meta-info">By {{ article.author }} | ~{{ article.reading_time }}</span>
+                        <a href="{{ article.url }}" class="read-more-btn">Read Article</a>
+                    </div>
+                </div>
+            </div>
         {% endfor %}
-        </div></div></div>
-    <script src="{{ particles_js_url }}"></script>
-    <script>
-        particlesJS('particles-js', { "particles": { "number": { "value": 60, "density": { "enable": true, "value_area": 800 } },
-            "color": { "value": "#ffffff" }, "shape": { "type": "circle" }, "opacity": { "value": 0.3, "random": true },
-            "size": { "value": 2, "random": true }, "line_linked": { "enable": true, "distance": 150, "color": "#8b949e", "opacity": 0.2, "width": 1 },
-            "move": { "enable": true, "speed": 1, "direction": "none", "random": true, "straight": false, "out_mode": "out" } },
-            "interactivity": { "detect_on": "canvas", "events": { "onhover": { "enable": true, "mode": "grab" }, "onclick": { "enable": true, "mode": "push" } } }
-        });
-    </script></body></html>
+        </div>
+        {% if not articles %}<div class="no-articles" style="text-align:center;padding:4rem;background-color:#1e1e1e;border-radius:16px;"><h2>No Articles Yet</h2><p>The system will automatically update in the next cycle.</p></div>{% endif %}
+    </div></body></html>
     """
-    # ... (后面的代码不变)
+    article_html_template = '''
+    <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Lora', serif; background-color: #0a0a0a; color: #e0e0e0; margin: 0;
+               background-image: radial-gradient(#222 1px, transparent 0); background-size: 30px 30px; }
+        .container { max-width: 760px; margin: 5rem auto; padding: 3rem; background-color: #121212; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1);}
+        .back-link { font-family: 'Inter', sans-serif; display: inline-block; margin-bottom: 4rem; text-decoration: none; color: #8e8e8e; }
+        .back-link:hover { color: #00aaff; } h1 { font-family: 'Inter', sans-serif; font-size: 3.5rem; line-height: 1.2; color: #fff; }
+        .article-meta { font-family: 'Inter', sans-serif; color: #888; margin: 1.5rem 0 4rem 0; border-bottom: 1px solid #333; padding-bottom: 2rem;}
+        .article-body { font-size: 1.25rem; line-height: 2.2; }
+    </style></head>
+    <body><div class="container">
+        <a href="index.html" class="back-link">← Back to List</a>
+        <h1>{{ title }}</h1>
+        <p class="article-meta">By {{ author }} | From {{ magazine }} | ~{{ reading_time }} Read</p>
+        <div class="article-body">{{ content }}</div>
+    </div></body></html>
+    '''
+    
+    articles_data = []
+    for topic_dir in ARTICLES_DIR.iterdir():
+        if not topic_dir.is_dir(): continue
+        for md_file in topic_dir.glob("*.md"):
+            try:
+                with md_file.open('r', encoding='utf-8') as f: content_lines = f.readlines()
+                title = content_lines[1].replace('title: ', '').strip()
+                author = content_lines[2].replace('author: ', '').strip()
+                reading_time = content_lines[4].replace('reading_time: ', '').strip()
+                content = "".join(content_lines[6:])
+                magazine_match = re.match(r'([a-zA-Z]+)', md_file.name)
+                magazine = magazine_match.group(1).capitalize() if magazine_match else "Unknown"
+                article_filename = f"{md_file.stem}.html"
+                article_path = WEBSITE_DIR / article_filename
+                
+                article_template = jinja2.Template(article_html_template)
+                article_html = article_template.render(title=title, content=markdown2.markdown(content), author=author, magazine=magazine, topic=topic_dir.name.capitalize(), reading_time=reading_time)
+                article_path.write_text(article_html, encoding='utf-8')
+                
+                articles_data.append({"title": title, "preview": re.sub(r'\s+', ' ', content[:200]), "url": article_filename, "topic": topic_dir.name, "magazine": magazine, "author": author, "reading_time": reading_time})
+            except Exception as e: logger.error(f"生成网页时处理文件 {md_file} 失败: {e}"); continue
+    articles_data.sort(key=lambda x: x['title'])
+    template = jinja2.Template(index_template_str)
+    index_html = template.render(articles=articles_data)
+    (WEBSITE_DIR / "index.html").write_text(index_html, encoding='utf-8')
+    (WEBSITE_DIR / ".nojekyll").touch()
+    if articles_data: logger.info(f"网站生成完成，包含 {len(articles_data)} 篇文章。")
+    else: logger.info("网站生成完成，但没有找到任何文章。")
+
+# ==============================================================================
+# 3. 主程序入口
+# ==============================================================================
+if __name__ == "__main__":
+    setup_directories()
+    process_all_magazines()
+    generate_website()
