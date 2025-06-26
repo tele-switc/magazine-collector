@@ -60,7 +60,7 @@ def process_epub_file(epub_path):
             if len(text_content.split()) > 150 and not any(kw in text_content[:500].lower() for kw in NON_ARTICLE_KEYWORDS) and text_content.count('\n\n') > 3:
                 articles.append(text_content)
     except Exception as e:
-        logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=False)
+        logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=True) # 打开完整错误信息
     return articles
 
 def generate_title_from_content(text, corpus):
@@ -85,39 +85,43 @@ def save_article(output_path, text_content, title, author):
     frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
     output_path.write_text(frontmatter + text_content, encoding="utf-8")
 
-### [最终修复] 使用更灵活的路径匹配逻辑 ###
+### [终极修复] 更灵活的路径匹配 + 更详细的诊断日志 ###
 def process_all_magazines():
-    logger.info("--- 开始文章提取流程 ---")
+    logger.info("--- 开始文章提取流程 (终极诊断模式) ---")
     
     if not SOURCE_REPO_PATH.is_dir():
         logger.error(f"致命错误: 源仓库目录 '{SOURCE_REPO_PATH}' 不存在！流程终止。")
         return
 
-    # 使用 os.walk 稳定地查找所有 EPUB 文件
     found_epubs = [Path(root) / file for root, _, files in os.walk(SOURCE_REPO_PATH) for file in files if file.endswith('.epub')]
-
     if not found_epubs:
         logger.warning("在源仓库中未找到任何 .epub 文件。流程终止。")
         return
 
-    # 按杂志对EPUB进行分组
     magazine_epubs = {name: [] for name in MAGAZINES}
+    logger.info("--- 开始文件分组诊断 ---")
     for path in found_epubs:
         path_str_lower = str(path).lower()
+        matched = False
         for name, info in MAGAZINES.items():
-            # 关键修复：不再要求完全匹配，而是检查路径中是否“包含”杂志名（不区分大小写，替换空格为下划线）
             search_keyword = info["folder"].lower().replace(' ', '_')
+            logger.info(f"  [诊断] 尝试匹配: 路径='{path_str_lower}' | 关键词='{search_keyword}'")
             if search_keyword in path_str_lower:
                 magazine_epubs[name].append(path)
-                break
-    
+                logger.info(f"    -> [成功] 路径 '{path.name}' 已分配给 '{name}'")
+                matched = True
+                break # 找到后就不用再匹配这个路径了
+        if not matched:
+            logger.warning(f"  [诊断] 警告: 路径 '{path.name}' 未能匹配任何已知杂志。")
+    logger.info("--- 文件分组诊断结束 ---")
+
     total_articles_extracted = 0
     for magazine_name, epub_paths in magazine_epubs.items():
         if not epub_paths:
-            logger.info(f"杂志 '{magazine_name}' 没有找到对应的EPUB文件，跳过。")
+            logger.info(f"杂志 '{magazine_name}' 没有找到可处理的EPUB文件，跳过。")
             continue
         
-        logger.info(f"\n>>> 处理杂志: {magazine_name} (找到 {len(epub_paths)} 个EPUB)")
+        logger.info(f"\n>>> 处理杂志: {magazine_name}")
         latest_file_path = sorted(epub_paths, key=lambda p: p.name, reverse=True)[0]
         logger.info(f"  处理最新文件: {latest_file_path.name}")
         
@@ -139,14 +143,16 @@ def process_all_magazines():
             
     logger.info(f"\n--- 文章提取流程结束。共提取了 {total_articles_extracted} 篇新文章。 ---")
 
+
 def generate_website():
-    logger.info("--- 开始生成网站 (水晶玻璃 UI) ---")
+    logger.info("--- 开始生成网站 (字体升级版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     
+    ### [FONT UPGRADE] 使用 Lexend (标题) + Lora (正文) ###
     shared_style_and_script = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700&display=swap');
-    body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #02040a; color: #e6edf3; margin: 0; }
+    @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@500;700&family=Lora:wght@400;700&display=swap');
+    body { background-color: #02040a; color: #e6edf3; margin: 0; }
     #dynamic-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
 </style>
 <canvas id="dynamic-canvas"></canvas>
@@ -159,32 +165,28 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
 <title>AI Curated Journals | Cosmos Engine</title>""" + shared_style_and_script + """
 <style>
     .container { max-width: 1400px; margin: 0 auto; padding: 4rem 2rem; position: relative; z-index: 1; }
+    h1, .card-title { font-family: 'Lexend', sans-serif; }
+    .card-meta, .card-footer, .read-link { font-family: 'Lexend', sans-serif; }
     h1 { font-size: clamp(2.5rem, 6vw, 4rem); text-align: center; margin-bottom: 5rem; color: #fff; font-weight: 700; text-shadow: 0 0 25px rgba(0, 191, 255, 0.4); }
     .grid { display: grid; gap: 2.5rem; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); }
     .card {
-        background: rgba(255, 255, 255, 0.04);
-        backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 18px; padding: 2rem;
-        box-shadow: 0 8px 32px 0 rgba(2, 4, 10, 0.3);
-        transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+        background: rgba(255, 255, 255, 0.04); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
+        border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 18px; padding: 2rem;
+        box-shadow: 0 8px 32px 0 rgba(2, 4, 10, 0.3); transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
         display: flex; flex-direction: column;
     }
     .card:hover {
-        transform: translateY(-12px) scale(1.03);
-        border: 1px solid transparent;
-        background: rgba(255, 255, 255, 0.08);
-        box-shadow: 0 16px 50px 0 rgba(0, 127, 255, 0.25);
-        border-image: linear-gradient(145deg, rgba(0, 191, 255, 0.8), rgba(255, 255, 255, 0.2)) 1;
+        transform: translateY(-12px) scale(1.03); border: 1px solid transparent; background: rgba(255, 255, 255, 0.08);
+        box-shadow: 0 16px 50px 0 rgba(0, 127, 255, 0.25); border-image: linear-gradient(145deg, rgba(0, 191, 255, 0.8), rgba(255, 255, 255, 0.2)) 1;
     }
     .card-title { font-size: 1.25rem; font-weight: 500; line-height: 1.4; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
-    .card-meta { color: #a3b3c6; font-size: 0.8rem; }
+    .card-meta { color: #a3b3c6; font-size: 0.8rem; font-weight: 400; }
     .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
     .read-link { color:#58a6ff; text-decoration:none; font-weight: 500; font-size: 0.9rem; }
     .no-articles { background: rgba(255, 255, 255, 0.04); backdrop-filter: blur(30px); border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.15); text-align:center; padding:5rem 2rem; }
 </style></head><body><div class="container"><h1>AI Curated Journals</h1><div class="grid">
 {% for article in articles %}<div class="card"><h3 class="card-title">{{ article.title }}</h3><p class="card-meta">{{ article.magazine }} · {{ article.reading_time }}</p><div class="card-footer"><span class="card-meta">By {{ article.author }}</span><a href="{{ article.url }}" class="read-link">Read →</a></div></div>{% endfor %}
-</div>{% if not articles %}<div class="no-articles"><h2>No Articles Found</h2><p>The Cosmos Engine ran successfully, but no new articles were processed in this cycle. Please check the source repository.</p></div>{% endif %}</div></body></html>"""
+</div>{% if not articles %}<div class="no-articles"><h2>No Articles Found</h2><p>The Cosmos Engine ran, but no new article files were processed. Please check the Action logs for diagnostic details.</p></div>{% endif %}</div></body></html>"""
 
     article_html_template = """
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }}</title>""" + shared_style_and_script + """
@@ -195,13 +197,16 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
         border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.15);
         position: relative; z-index: 1; box-shadow: 0 8px 32px 0 rgba(2, 4, 10, 0.35);
     }
+    .back-link, .article-meta, h1 { font-family: 'Lexend', sans-serif; }
+    .article-body { font-family: 'Lora', serif; }
     .back-link { display: inline-block; margin-bottom: 3rem; text-decoration: none; color: #a3b3c6; transition: color 0.3s; } .back-link:hover { color: #58a6ff; }
     h1 { font-size: clamp(1.8rem, 5vw, 2.8rem); line-height: 1.2; color: #fff; margin:0; font-weight: 700; }
     .article-meta { color: #a3b3c6; margin: 1.5rem 0 3rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 2rem; font-size: 0.9rem; }
-    .article-body { font-size: 1.1rem; line-height: 1.9; color: #d0d8e0; }
+    .article-body { font-size: 1.15rem; line-height: 1.9; color: #d0d8e0; }
     .article-body p { margin: 0 0 1.5em 0; }
 </style></head><body><div class="article-container"><a href="index.html" class="back-link">← Back to Journals</a><h1>{{ title }}</h1><p class="article-meta">By {{ author }} · From {{ magazine }} · {{ reading_time }}</p><div class="article-body">{{ content }}</div></div></body></html>"""
 
+    # ... (模板渲染逻辑保持不变)
     articles_data = []
     md_files = glob.glob(str(ARTICLES_DIR / '**/*.md'), recursive=True)
     logger.info(f"找到 {len(md_files)} 个 Markdown 文件用于生成网页。")
