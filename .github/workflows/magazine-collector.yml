@@ -1,63 +1,94 @@
+# 工作流名称
 name: Magazine Article Collector
 
+# 触发工作流的事件
 on:
+  # 1. 定时触发：使用 CRON 表达式
+  # '0 1 * * *' 表示每天的 UTC 时间 01:00 运行。
+  # 这对应于北京时间 (UTC+8) 的早上 9:00。
   schedule:
-    - cron: '0 1 * * *' # 北京时间早上9点
+    - cron: '0 1 * * *'
+
+  # 2. 手动触发：允许在 GitHub Actions 页面手动点击运行
   workflow_dispatch:
+
+  # 3. 推送触发：当 main 分支有新的 push 时触发（可选，方便调试）
   push:
     branches:
       - main
 
+# 定义工作流中的任务
 jobs:
+  # 第一个任务：构建网站内容
   build:
+    # 运行环境：使用最新的 Ubuntu 系统
     runs-on: ubuntu-latest
+
+    # 任务步骤
     steps:
+      # 步骤 1: 检出当前仓库代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 步骤 2: 克隆包含 EPUB 源文件的仓库
+      # --depth=1 表示只克隆最新的 commit，加快克隆速度
       - name: Clone source repository
         run: git clone --depth=1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo
 
+      # 步骤 3: 设置 Python 环境
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip' # 缓存依赖项，加快后续运行速度
 
+      # 步骤 4: 安装 Python 依赖和 NLTK 数据包
       - name: Install dependencies and NLTK data
         run: |
           python -m pip install --upgrade pip
-          pip install beautifulsoup4 ebooklib pdfplumber nltk markdown2 jinja2 scikit-learn
-          # 使用最明确、最可靠的方式下载NLTK数据
+          # lxml 用于更高效的HTML解析
+          pip install beautifulsoup4 ebooklib lxml nltk markdown2 jinja2 scikit-learn
+          # 使用 Python 脚本下载 NLTK 数据，这是最可靠的方式
           python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True); nltk.download('averaged_perceptron_tagger', quiet=True)"
 
-      # 【最终保险措施】在运行脚本前，确保 docs 文件夹一定存在
-      - name: Ensure docs directory exists
-        run: mkdir -p docs
-
-      - name: Run magazine collector script
-        run: python ./.github/scripts/collector.py
-
-      - name: DEBUG - List all generated files
-        if: always()
+      # 步骤 5: 运行核心脚本来提取文章和生成网站
+      - name: Run collector script
+        # 确保这个路径与您仓库中 collector.py 的实际位置匹配
+        run: python collector.py
+        
+      # 步骤 6: (调试用) 列出生成的文件，方便检查结果
+      - name: DEBUG - List generated files
+        if: always() # 无论前面的步骤是否成功，都执行此步骤
         run: ls -R
 
-      # 【官方部署步骤 1】将生成的 docs 文件夹打包成一个 "artifact"
+      # 步骤 7: 上传构建好的网站内容 (./docs 目录)
+      # 这是部署到 GitHub Pages 的标准步骤之一
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./docs
 
+  # 第二个任务：部署到 GitHub Pages
   deploy:
+    # 依赖于 'build' 任务成功完成
     needs: build
+    
+    # 部署步骤所需的权限
     permissions:
-      pages: write
-      id-token: write
+      pages: write      # 允许写入到 GitHub Pages
+      id-token: write   # 允许使用 OIDC token进行身份验证
+
+    # 指定部署环境
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+
+    # 运行环境
     runs-on: ubuntu-latest
+
+    # 部署步骤
     steps:
-      # 【官方部署步骤 2】从 "artifact" 部署到 GitHub Pages
+      # 从之前上传的 artifact 中下载网站内容并部署
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
