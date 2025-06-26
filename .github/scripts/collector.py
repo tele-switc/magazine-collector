@@ -28,7 +28,7 @@ WEBSITE_DIR = Path("docs")
 NON_ARTICLE_KEYWORDS = ['contents', 'index', 'editor', 'letter', 'subscription', 'classifieds', 'masthead', 'copyright', 'advertisement', 'the world this week', 'back issues']
 
 # ==============================================================================
-# 2. 核心功能函数 (这部分逻辑已完善，无需修改)
+# 2. 核心功能函数
 # ==============================================================================
 
 def setup_directories():
@@ -38,16 +38,12 @@ def setup_directories():
         (ARTICLES_DIR / info['topic']).mkdir(exist_ok=True)
 
 def clean_article_text(text):
-    text = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '', text)
-    text = re.sub(r'https?://\S+', '', text)
+    text = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '', text); text = re.sub(r'https?://\S+', '', text)
     text = re.sub(r'subscribe now|for more information|visit our website|follow us on', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'Page\s+\d+', '', text)
-    text = re.sub(r'\n\s*\n', '\n\n', text)
-    return text.strip()
+    text = re.sub(r'Page\s+\d+', '', text); return re.sub(r'\n\s*\n', '\n\n', text).strip()
 
 def split_text_into_articles(text):
-    ending_punctuations = ('.', '?', '!', '"', '”', '’')
-    potential_articles = re.split(r'\n\s*\n\s*\n+', text)
+    ending_punctuations = ('.', '?', '!', '"', '”', '’'); potential_articles = re.split(r'\n\s*\n\s*\n+', text)
     articles = []
     for article_text in potential_articles:
         article_text = article_text.strip()
@@ -56,199 +52,118 @@ def split_text_into_articles(text):
         if sum(1 for keyword in NON_ARTICLE_KEYWORDS if keyword in lower_text) > 1: continue
         if len(article_text.split()) < 250: continue
         articles.append(article_text)
-    if not articles: logger.warning("本次未能从文本中识别出任何符合质量标准的完整文章。")
     return articles
 
-def generate_title_from_content(text_content):
-    """【修复版AI标题生成器】现在会正确忽略数字。"""
+def generate_title_from_content(text_content, all_texts_corpus):
     try:
-        # 定义英文停用词，并手动加入一个正则表达式来匹配所有纯数字
         stop_words = list(stopwords.words('english'))
-        stop_words.append(r'\b\d+\b')
-
-        vectorizer = TfidfVectorizer(max_features=10, stop_words=stop_words, ngram_range=(1, 3), token_pattern=r'(?u)\b[a-zA-Z]{3,}\b')
-        
-        preview_text = " ".join(text_content.split()[:len(text_content.split())//3])
-        if len(preview_text) < 100: preview_text = text_content
-
-        vectorizer.fit([preview_text])
-        keywords = vectorizer.get_feature_names_out()
-        
-        title = ' '.join(word.capitalize() for word in keywords[:5])
-        
-        if not title or len(title.split()) < 3:
-            return nltk.sent_tokenize(text_content)[0]
-
+        stop_words.extend(['would', 'could', 'said', 'also', 'like', 'get', 'one', 'two', 'told', 'mr', 'ms'])
+        vectorizer = TfidfVectorizer(max_features=20, stop_words=stop_words, ngram_range=(1, 2), token_pattern=r'(?u)\b[a-zA-Z-]{3,}\b')
+        vectorizer.fit(all_texts_corpus)
+        response = vectorizer.transform([text_content])
+        feature_names = vectorizer.get_feature_names_out()
+        scores = response.toarray().flatten()
+        top_keyword_indices = scores.argsort()[-7:][::-1]
+        good_keywords = []
+        for i in top_keyword_indices:
+            keyword = feature_names[i]
+            pos_tag = nltk.pos_tag([keyword.split()[0]])[0][1]
+            if pos_tag.startswith('NN') or pos_tag.startswith('JJ'):
+                good_keywords.append(keyword)
+        if len(good_keywords) < 3: return nltk.sent_tokenize(text_content)[0]
+        title = ' '.join(word.capitalize() for word in good_keywords[:4])
         return title
-
     except Exception as e:
-        logger.error(f"AI生成标题失败: {e}")
-        try: return nltk.sent_tokenize(text_content)[0]
-        except: return "Untitled Article"
+        logger.error(f"AI生成标题失败: {e}"); return nltk.sent_tokenize(text_content)[0]
 
 def process_all_magazines():
-    if not SOURCE_REPO_PATH.is_dir(): return
+    if not SOURCE_REPO_PATH.is_dir(): logger.error(f"源仓库目录 '{SOURCE_REPO_PATH}' 未找到!"); return
     try:
-        nltk.data.find('corpora/stopwords')
-        nltk.data.find('tokenizers/punkt')
+        nltk.data.find('corpora/stopwords'); nltk.data.find('tokenizers/punkt'); nltk.data.find('taggers/averaged_perceptron_tagger')
     except LookupError:
-        nltk.download('stopwords')
-        nltk.download('punkt')
-    
-    processed_fingerprints = set()
+        nltk.download('stopwords'); nltk.download('punkt'); nltk.download('averaged_perceptron_tagger')
+    all_article_contents = []; magazine_contents = {}
     for magazine_name, info in MAGAZINES.items():
         source_folder = SOURCE_REPO_PATH / info["folder"]
-        topic = info["topic"]
         if not source_folder.is_dir(): continue
-
         for file_path in source_folder.rglob('*.epub'):
             if magazine_name in file_path.name.lower():
-                check_path = ARTICLES_DIR / topic / f"{file_path.stem}_art_1.md"
-                if check_path.exists(): continue
-                
-                logger.info(f"处理新杂志: {file_path.name}")
-                try:
+                if file_path.stem not in magazine_contents:
+                    logger.info(f"读取新杂志: {file_path.name}")
                     full_text = extract_text_from_epub(str(file_path))
-                    if full_text:
-                        articles_in_magazine = split_text_into_articles(full_text)
-                        for i, article_content in enumerate(articles_in_magazine):
-                            fingerprint = article_content.strip()[:60]
-                            if fingerprint in processed_fingerprints: continue
-                            processed_fingerprints.add(fingerprint)
-                            
-                            cleaned_content = clean_article_text(article_content)
-                            if len(cleaned_content.split()) < 200: continue
-                            
-                            title = generate_title_from_content(cleaned_content)
-                            author_match = re.search(r'By\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)', cleaned_content)
-                            author = author_match.group(1) if author_match else "N/A"
-                            
-                            article_md_filename = f"{file_path.stem}_art_{i+1}.md"
-                            output_path = ARTICLES_DIR / topic / article_md_filename
-                            save_article(output_path, cleaned_content, title, author)
-                except Exception as e:
-                    logger.error(f"处理文件 {file_path.name} 时出错: {e}")
+                    if full_text: magazine_contents[file_path.stem] = split_text_into_articles(full_text)
+                    all_article_contents.extend(magazine_contents.get(file_path.stem, []))
+    processed_fingerprints = set()
+    for stem, articles_in_magazine in magazine_contents.items():
+        magazine_name, topic = "unknown", "unknown"
+        for m, info in MAGAZINES.items():
+            if m in stem: magazine_name, topic = m, info['topic']
+        for i, article_content in enumerate(articles_in_magazine):
+            fingerprint = article_content.strip()[:60]
+            if fingerprint in processed_fingerprints: continue
+            processed_fingerprints.add(fingerprint)
+            cleaned_content = clean_article_text(article_content)
+            if len(cleaned_content.split()) < 200: continue
+            title = generate_title_from_content(cleaned_content, all_article_contents)
+            author_match = re.search(r'By\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)', cleaned_content)
+            author = author_match.group(1) if author_match else "N/A"
+            article_md_filename = f"{stem}_art_{i+1}.md"
+            output_path = ARTICLES_DIR / topic / article_md_filename
+            save_article(output_path, cleaned_content, title, author)
 
 def extract_text_from_epub(epub_path):
     try:
-        book = epub.read_epub(epub_path)
-        return "\n".join(BeautifulSoup(item.get_content(), 'html.parser').get_text() for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
+        book = epub.read_epub(epub_path); return "\n".join(BeautifulSoup(item.get_content(), 'html.parser').get_text() for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
     except Exception as e: logger.error(f"提取EPUB失败 {epub_path}: {e}"); return ""
 
 def save_article(output_path, text_content, title, author):
-    word_count = len(text_content.split())
-    reading_time = round(word_count / 200) 
+    word_count = len(text_content.split()); reading_time = round(word_count / 200) 
     with output_path.open("w", encoding="utf-8") as f:
         f.write(f"---\ntitle: {title}\nauthor: {author}\nwords: {word_count}\nreading_time: {reading_time} min\n---\n\n{text_content}")
-    logger.info(f"已保存: {output_path.name} (作者: {author})")
+    logger.info(f"已保存: {output_path.name}")
 
 def generate_website():
-    """【赛博朋克美学版】"""
+    """【最终艺术品版】"""
     WEBSITE_DIR.mkdir(exist_ok=True)
+    # 注入 particles.js 库
+    particles_js_url = "https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"
+    # 主页模板
     index_template_str = """
     <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Curated Journals</title><link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
-        :root { --accent-color: #00aaff; --bg-color: #0a0a0a; --card-color: #1a1a1a; --text-color: #eaeaea; 
-                --secondary-text: #888; --border-color: rgba(255, 255, 255, 0.1); }
-        body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 4rem 2rem;
-               background-image: radial-gradient(var(--secondary-text) 1px, transparent 0); background-size: 40px 40px; }
+        :root { --accent-color: #33a0ff; --bg-color: #0d1117; --card-color: #161b22; --text-color: #c9d1d9; 
+                --secondary-text: #8b949e; --border-color: rgba(139, 148, 158, 0.2); }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 4rem 2rem; }
+        #particles-js { position: fixed; width: 100%; height: 100%; top: 0; left: 0; z-index: 0; }
+        .content-wrapper { position: relative; z-index: 1; }
         .container { max-width: 1320px; margin: 0 auto; }
-        .header { text-align: center; margin-bottom: 5rem; }
-        .header h1 { font-size: 5rem; font-weight: 700; color: #fff; margin: 0; letter-spacing: -2px; }
-        .header p { font-size: 1.25rem; color: var(--secondary-text); margin-top: 0.5rem; }
-        .grid { display: grid; gap: 2rem; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+        .header h1 { font-size: 5rem; text-align: center; margin-bottom: 4rem; color: #fff; }
+        .grid { display: grid; gap: 2.5rem; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
         .card { background: var(--card-color); border: 1px solid var(--border-color); border-radius: 16px;
-                transition: transform 0.3s ease, box-shadow 0.3s ease; display: flex; flex-direction: column; overflow: hidden;}
-        .card:hover { transform: scale(1.03); box-shadow: 0 0 40px rgba(0, 170, 255, 0.2); }
-        .card-content { padding: 2rem; flex-grow: 1; display: flex; flex-direction: column; }
-        .card-title { font-size: 1.5rem; font-weight: 500; margin: 0 0 1rem 0; color: #fff; line-height: 1.4; }
-        .card-preview { font-size: 1rem; line-height: 1.7; color: var(--secondary-text); margin-bottom: 2rem; flex-grow: 1; border-left: 3px solid var(--accent-color); padding-left: 1.5rem; }
-        .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 1.5rem; border-top: 1px solid var(--border-color); }
-        .meta-info { font-size: 0.85rem; color: #8e8e8e; }
-        .read-more-btn { font-size: 0.9rem; font-weight: 500; color: #fff; border: 1px solid var(--accent-color);
-                         padding: 0.8rem 1.6rem; border-radius: 12px; text-decoration: none; transition: all 0.2s ease; }
-        .read-more-btn:hover { background-color: var(--accent-color); color: var(--bg-color); }
+                transition: all 0.3s ease; display: flex; flex-direction: column; }
+        .card:hover { transform: translateY(-8px); box-shadow: 0 0 30px rgba(51, 160, 255, 0.2); border-color: var(--accent-color); }
+        .card-content { padding: 2rem; flex-grow: 1; } .card-title { font-size: 1.5rem; margin: 0 0 1rem 0; color: #fff; }
+        .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 1.5rem; margin-top: auto; border-top: 1px solid var(--border-color); }
     </style></head>
-    <body><div class="container">
-        <div class="header"><h1>AI Curated Journals</h1><p>Intelligently curated articles from the world's leading journals.</p></div>
-        <div class="grid">
+    <body><div id="particles-js"></div><div class="content-wrapper"><div class="container">
+        <div class="header"><h1>AI Curated Journals</h1></div><div class="grid">
         {% for article in articles %}
-            <div class="card">
-                <div class="card-content">
-                    <h5 class="card-title">{{ article.title }}</h5>
-                    <p class="card-preview">{{ article.preview }}...</p>
-                    <div class="card-footer">
-                        <span class="meta-info">By {{ article.author }} | ~{{ article.reading_time }}</span>
-                        <a href="{{ article.url }}" class="read-more-btn">Read Article</a>
-                    </div>
-                </div>
-            </div>
+            <div class="card"><div class="card-content">
+                <h5 class="card-title">{{ article.title }}</h5>
+                <div class="card-footer"><span>By {{ article.author }}</span><a href="{{ article.url }}" style="color:var(--accent-color);">Read →</a></div>
+            </div></div>
         {% endfor %}
-        </div>
-        {% if not articles %}<div class="no-articles" style="text-align:center;padding:4rem;background-color:#1e1e1e;border-radius:16px;"><h2>No Articles Yet</h2></div>{% endif %}
-    </div></body></html>
+        </div></div></div>
+    <script src="{{ particles_js_url }}"></script>
+    <script>
+        particlesJS('particles-js', { "particles": { "number": { "value": 60, "density": { "enable": true, "value_area": 800 } },
+            "color": { "value": "#ffffff" }, "shape": { "type": "circle" }, "opacity": { "value": 0.3, "random": true },
+            "size": { "value": 2, "random": true }, "line_linked": { "enable": true, "distance": 150, "color": "#8b949e", "opacity": 0.2, "width": 1 },
+            "move": { "enable": true, "speed": 1, "direction": "none", "random": true, "straight": false, "out_mode": "out" } },
+            "interactivity": { "detect_on": "canvas", "events": { "onhover": { "enable": true, "mode": "grab" }, "onclick": { "enable": true, "mode": "push" } } }
+        });
+    </script></body></html>
     """
-    article_html_template = '''
-    <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }}</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Lora', serif; background-color: #0a0a0a; color: #e0e0e0; margin: 0;
-               background-image: radial-gradient(#222 1px, transparent 0); background-size: 30px 30px; }
-        .container { max-width: 760px; margin: 5rem auto; padding: 3rem; background-color: #121212; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1);}
-        .back-link { font-family: 'Inter', sans-serif; display: inline-block; margin-bottom: 4rem; text-decoration: none; color: #8e8e8e; font-weight: 500; }
-        .back-link:hover { color: #00aaff; }
-        h1 { font-family: 'Inter', sans-serif; font-size: 3.5rem; font-weight: 700; line-height: 1.2; margin-bottom: 1.5rem; color: #fff; }
-        .article-meta { font-family: 'Inter', sans-serif; color: #8e8e8e; margin-bottom: 4rem; border-bottom: 1px solid #333; padding-bottom: 2rem;}
-        .article-body { font-size: 1.25rem; line-height: 2.2; }
-        .article-body p { margin-bottom: 2rem; }
-    </style></head>
-    <body><div class="container">
-        <a href="index.html" class="back-link">← Back to List</a>
-        <h1>{{ title }}</h1>
-        <p class="article-meta">By {{ author }} | From {{ magazine }} | ~{{ reading_time }} Read</p>
-        <div class="article-body">{{ content }}</div>
-    </div></body></html>
-    '''
-    
-    # ... (后面的 generate_website 函数逻辑保持不变) ...
-    articles_data = []
-    for topic_dir in ARTICLES_DIR.iterdir():
-        if not topic_dir.is_dir(): continue
-        for md_file in topic_dir.glob("*.md"):
-            try:
-                with md_file.open('r', encoding='utf-8') as f: content_lines = f.readlines()
-                title = content_lines[1].replace('title: ', '').strip()
-                author = content_lines[2].replace('author: ', '').strip()
-                reading_time = content_lines[4].replace('reading_time: ', '').strip()
-                content = "".join(content_lines[6:])
-                magazine_match = re.match(r'([a-zA-Z]+)', md_file.name)
-                magazine = magazine_match.group(1).capitalize() if magazine_match else "Unknown"
-                article_filename = f"{md_file.stem}.html"
-                article_path = WEBSITE_DIR / article_filename
-                
-                article_template = jinja2.Template(article_html_template)
-                article_html = article_template.render(title=title, content=markdown2.markdown(content), author=author, magazine=magazine, topic=topic_dir.name.capitalize(), reading_time=reading_time)
-                article_path.write_text(article_html, encoding='utf-8')
-                
-                articles_data.append({"title": title, "preview": re.sub(r'\s+', ' ', content[:200]), "url": article_filename, "topic": topic_dir.name, "magazine": magazine, "author": author, "reading_time": reading_time})
-            except Exception as e:
-                logger.error(f"生成网页时处理文件 {md_file} 失败: {e}")
-                continue
-    articles_data.sort(key=lambda x: x['title'])
-    template = jinja2.Template(index_template_str)
-    index_html = template.render(articles=articles_data)
-    (WEBSITE_DIR / "index.html").write_text(index_html, encoding='utf-8')
-    (WEBSITE_DIR / ".nojekyll").touch()
-    if articles_data: logger.info(f"网站生成完成，包含 {len(articles_data)} 篇文章。")
-    else: logger.info("网站生成完成，但没有找到任何文章。")
-
-# ==============================================================================
-# 3. 主程序入口
-# ==============================================================================
-if __name__ == "__main__":
-    setup_directories()
-    process_all_magazines()
-    generate_website()
+    # ... (后面的代码不变)
