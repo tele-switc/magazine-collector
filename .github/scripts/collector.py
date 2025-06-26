@@ -77,10 +77,7 @@ def generate_title_from_content(text_content, all_texts_corpus):
 
 def process_all_magazines():
     if not SOURCE_REPO_PATH.is_dir(): logger.error(f"源仓库目录 '{SOURCE_REPO_PATH}' 未找到!"); return
-    try:
-        nltk.data.find('corpora/stopwords'); nltk.data.find('tokenizers/punkt'); nltk.data.find('taggers/averaged_perceptron_tagger')
-    except LookupError:
-        nltk.download('stopwords'); nltk.download('punkt'); nltk.download('averaged_perceptron_tagger')
+    
     all_article_contents = []; magazine_contents = {}
     for magazine_name, info in MAGAZINES.items():
         source_folder = SOURCE_REPO_PATH / info["folder"]
@@ -92,6 +89,7 @@ def process_all_magazines():
                     full_text = extract_text_from_epub(str(file_path))
                     if full_text: magazine_contents[file_path.stem] = split_text_into_articles(full_text)
                     all_article_contents.extend(magazine_contents.get(file_path.stem, []))
+                    
     processed_fingerprints = set()
     for stem, articles_in_magazine in magazine_contents.items():
         magazine_name, topic = "unknown", "unknown"
