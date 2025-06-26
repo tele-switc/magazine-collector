@@ -12,13 +12,17 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from nltk.corpus import stopwords
 
 # ==============================================================================
-# 1. 配置区域
+# 1. 配置和初始化
 # ==============================================================================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 if 'NLTK_DATA' in os.environ:
     nltk.data.path.append(os.environ['NLTK_DATA'])
+else:
+    nltk_data_path = Path.cwd() / "nltk_data"
+    nltk_data_path.mkdir(exist_ok=True)
+    nltk.data.path.append(str(nltk_data_path))
 
 SOURCE_REPO_PATH = Path("source_repo")
 MAGAZINES = {
@@ -33,6 +37,7 @@ NON_ARTICLE_KEYWORDS = ['contents', 'index', 'editor', 'letter', 'subscription',
 # ==============================================================================
 # 2. 核心功能函数
 # ==============================================================================
+
 def setup_directories():
     ARTICLES_DIR.mkdir(exist_ok=True)
     WEBSITE_DIR.mkdir(exist_ok=True)
@@ -41,7 +46,7 @@ def setup_directories():
 def clean_article_text(text):
     text = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '', text); text = re.sub(r'https?://\S+', '', text)
     text = re.sub(r'subscribe now|for more information|visit our website|follow us on', '', text, flags=re.IGNORECASE)
-    return re.sub(r'\n\s*\n', '\n\n', text).strip()
+    text = re.sub(r'Page\s+\d+', '', text); return re.sub(r'\n\s*\n', '\n\n', text).strip()
 
 def split_text_into_articles(text):
     ending_punctuations = ('.', '?', '!', '"', '”', '’'); articles = []
@@ -78,18 +83,12 @@ def process_all_magazines():
     for magazine_name, info in MAGAZINES.items():
         source_folder = SOURCE_REPO_PATH / info["folder"]
         if not source_folder.is_dir(): continue
-        
-        # ↓↓↓↓↓↓【返璞归真】回归最成功的、最简单的文件查找逻辑 ↓↓↓↓↓↓
         for file_path in source_folder.glob('*.epub'):
-            if magazine_name in file_path.name.lower():
-        # ↑↑↑↑↑↑【返璞归真】回归最成功的、最简单的文件查找逻辑 ↑↑↑↑↑↑
-                if file_path.stem not in magazine_contents:
-                    logger.info(f"读取: {file_path.name}")
-                    full_text = extract_text_from_epub(str(file_path))
-                    if full_text:
-                        magazine_contents[file_path.stem] = split_text_into_articles(full_text)
-                        all_article_contents.extend(magazine_contents.get(file_path.stem, []))
-    
+            if magazine_name in file_path.name.lower() and file_path.stem not in magazine_contents:
+                logger.info(f"读取: {file_path.name}")
+                full_text = extract_text_from_epub(str(file_path))
+                if full_text: magazine_contents[file_path.stem] = split_text_into_articles(full_text)
+                all_article_contents.extend(magazine_contents.get(file_path.stem, []))
     processed_fingerprints = set()
     for stem, articles_in_magazine in magazine_contents.items():
         magazine_name, topic = next(((m, info['topic']) for m, info in MAGAZINES.items() if m in stem), ("unknown", "unknown"))
@@ -116,45 +115,47 @@ def save_article(output_path, text_content, title, author):
     logger.info(f"已保存: {output_path.name}")
 
 def generate_website():
-    """【最终美学版】带有粒子特效和流光卡片"""
+    """【最终修复版】无论如何都生成 index.html"""
     WEBSITE_DIR.mkdir(exist_ok=True)
     index_template_str = """
     <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Curated Journals</title><link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
-    <style>
-        @property --angle { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
-        :root { --bg-color: #0d1117; --card-color: #161b22; --text-color: #c9d1d9; --secondary-text: #8b949e; 
-                --border-color: rgba(255, 255, 255, 0.1); --glow-color: rgba(0, 191, 255, 0.6); }
-        body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 4rem 2rem; overflow-x: hidden; }
-        #particles-js { position: fixed; width: 100%; height: 100%; top: 0; left: 0; z-index: -1; }
-        .container { max-width: 1320px; margin: 0 auto; } .header { text-align: center; margin-bottom: 5rem; }
-        .header h1 { font-size: 5rem; font-weight: 700; color: #fff; margin: 0; letter-spacing: -2px; }
-        .grid { display: grid; gap: 2.5rem; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
-        .card { background: var(--card-color); border: 1px solid var(--border-color); border-radius: 16px;
-                transition: transform 0.3s ease; display: flex; flex-direction: column; position: relative; padding: 1px; }
-        .card:hover { transform: translateY(-8px); }
-        .card::before, .card::after { content: ''; position: absolute; inset: -1px; z-index: -1; background: conic-gradient(from var(--angle), transparent 50%, var(--glow-color), transparent);
-                                     border-radius: inherit; animation: rotate 6s linear infinite; }
-        .card::after { filter: blur(20px); }
-        .card-inner { background: var(--card-color); border-radius: 15px; padding: 2rem; height: 100%; display: flex; flex-direction: column; }
-        .card-title { font-size: 1.5rem; line-height: 1.4; color: #fff; margin: 0 0 1rem 0; }
-        .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: auto; padding-top: 1.5rem; border-top: 1px solid var(--border-color); }
-        @keyframes rotate { to { --angle: 360deg; } }
-    </style></head>
-    <body><div id="particles-js"></div><div class="container">
-        <div class="header"><h1>AI Curated Journals</h1></div><div class="grid">
-        {% for article in articles %}
-            <div class="card"><div class="card-inner">
-                <h5 class="card-title">{{ article.title }}</h5>
-                <div class="card-footer"><span style="color:#8e8e8e;">By {{ article.author }}</span><a href="{{ article.url }}" style="color:#fff;text-decoration:none;">Read →</a></div>
-            </div></div>
-        {% endfor %}
-        </div></div>
-    <script src="https://cdn.jsdelivr.net/npm/particles.js@2.0.0/particles.min.js"></script>
-    <script>
-        particlesJS('particles-js', {"particles":{"number":{"value":50,"density":{"enable":true,"value_area":800}},"color":{"value":"#ffffff"},"shape":{"type":"circle"},"opacity":{"value":0.1,"random":true},"size":{"value":2,"random":true},"line_linked":{"enable":false},"move":{"enable":true,"speed":1,"direction":"none","random":true,"straight":false,"out_mode":"out"}},"interactivity":{}});
-    </script></body></html>
-    """
-    article_html_template = """... (文章页模板保持不变) ..."""
-    # ... (后面的网站生成逻辑保持不变)
+    <title>AI Curated Journals</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>:root { --accent-color: #33a0ff; --bg-color: #0d1117; --card-color: #161b22; --text-color: #c9d1d9; --secondary-text: #8b949e; --border-color: rgba(139, 148, 158, 0.2); } body { font-family: 'Inter', sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 4rem 2rem; background-image: radial-gradient(var(--secondary-text) 1px, transparent 0); background-size: 40px 40px; } .container { max-width: 1320px; margin: 0 auto; } .header { text-align: center; margin-bottom: 5rem; } .header h1 { font-size: 5rem; font-weight: 700; color: #fff; margin: 0; letter-spacing: -2px; } .grid { display: grid; gap: 2rem; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); } .card { background: var(--card-color); border: 1px solid var(--border-color); border-radius: 16px; transition: transform 0.3s ease, box-shadow 0.3s ease; display: flex; flex-direction: column; } .card:hover { transform: translateY(-8px); box-shadow: 0 0 30px rgba(51, 160, 255, 0.2); border-color: var(--accent-color); } .card-content { padding: 2rem; flex-grow: 1; } .card-title { font-size: 1.5rem; margin: 0 0 1rem 0; color: #fff; } .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 1.5rem; margin-top: auto; border-top: 1px solid var(--border-color); } .meta-info { font-size: 0.85rem; color: #8e8e8e; } .read-more-btn { font-size: 0.9rem; font-weight: 500; color: #fff; border: 1px solid var(--accent-color); padding: 0.8rem 1.6rem; border-radius: 12px; text-decoration: none; transition: all 0.2s ease; } .read-more-btn:hover { background-color: var(--accent-color); color: var(--bg-color); }</style></head>
+    <body><div class="container"> <div class="header"><h1>AI Curated Journals</h1></div> <div class="grid"> {% for article in articles %} <div class="card"><div class="card-content"> <h5 class="card-title">{{ article.title }}</h5> <div class="card-footer"><span class="meta-info">By {{ article.author }} | {{ article.reading_time }}</span><a href="{{ article.url }}" class="read-more-btn">Read Article</a></div> </div></div> {% endfor %} </div>{% if not articles %}<div style="text-align:center;padding:4rem;background-color:#1e1e1e;border-radius:16px;"><h2>No Articles Yet</h2><p>The system will automatically update when new content is available.</p></div>{% endif %} </div></body></html>"""
+    article_html_template = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet"><style>body { font-family: 'Lora', serif; background-color: #0a0a0a; color: #e0e0e0; margin: 0; background-image: radial-gradient(#222 1px, transparent 0); background-size: 30px 30px; } .container { max-width: 760px; margin: 5rem auto; padding: 3rem; background-color: #121212; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1);} .back-link { font-family: 'Inter', sans-serif; display: inline-block; margin-bottom: 4rem; text-decoration: none; color: #8e8e8e; } .back-link:hover { color: #00aaff; } h1 { font-family: 'Inter', sans-serif; font-size: 3.5rem; line-height: 1.2; color: #fff; } .article-meta { font-family: 'Inter', sans-serif; color: #888; margin: 1.5rem 0 4rem 0; border-bottom: 1px solid #333; padding-bottom: 2rem;} .article-body { font-size: 1.25rem; line-height: 2.2; }</style></head><body><div class="container"><a href="index.html" class="back-link">← Back to List</a><h1>{{ title }}</h1><p class="meta-info">By {{ author }} | From {{ magazine }} | {{ reading_time }}</p><div class="article-body">{{ content }}</div></div></body></html>"""
+    
+    articles_data = []
+    for topic_dir in ARTICLES_DIR.iterdir():
+        if not topic_dir.is_dir(): continue
+        for md_file in topic_dir.glob("*.md"):
+            try:
+                with md_file.open('r', encoding='utf-8') as f: content_lines = f.readlines()
+                title, author, reading_time, content = content_lines[1].split(': ')[1].strip(), content_lines[2].split(': ')[1].strip(), content_lines[4].split(': ')[1].strip(), "".join(content_lines[6:])
+                magazine = re.match(r'([a-zA-Z]+)', md_file.name).group(1).capitalize()
+                article_filename, article_path = f"{md_file.stem}.html", WEBSITE_DIR / f"{md_file.stem}.html"
+                article_template = jinja2.Template(article_html_template)
+                article_html = article_template.render(title=title, content=markdown2.markdown(content), author=author, magazine=magazine, topic=topic_dir.name.capitalize(), reading_time=reading_time)
+                article_path.write_text(article_html, encoding='utf-8')
+                articles_data.append({"title": title, "preview": re.sub(r'\s+', ' ', content[:200]), "url": article_filename, "topic": topic_dir.name, "magazine": magazine, "author": author, "reading_time": reading_time})
+            except Exception as e: logger.error(f"生成网页时处理文件 {md_file} 失败: {e}"); continue
+    
+    articles_data.sort(key=lambda x: x['title'])
+    template = jinja2.Template(index_template_str)
+    
+    # ↓↓↓↓↓↓【最终修复】无论如何，都生成 index.html ↓↓↓↓↓↓
+    index_html = template.render(articles=articles_data)
+    (WEBSITE_DIR / "index.html").write_text(index_html, encoding='utf-8')
+    (WEBSITE_DIR / ".nojekyll").touch()
+    
+    if articles_data: logger.info(f"网站生成完成，包含 {len(articles_data)} 篇文章。")
+    else: logger.info("网站生成完成，但当前没有任何文章可供展示。")
+    # ↑↑↑↑↑↑【最终修复】无论如何，都生成 index.html ↑↑↑↑↑↑
+
+# ==============================================================================
+# 3. 主程序入口
+# ==============================================================================
+if __name__ == "__main__":
+    setup_directories()
+    # 我们不再需要在脚本内部下载NLTK数据，因为.yml文件会准备好一切
+    process_all_magazines()
+    generate_website()
