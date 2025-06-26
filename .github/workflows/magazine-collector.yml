@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+# 【专家建议 1】定义一个全局环境变量，指定 NLTK 数据的存放位置
+env:
+  NLTK_DATA: ${{ github.workspace }}/.cache/nltk_data
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -23,14 +27,33 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies and NLTK data
+      # 【专家建议 2】缓存这个数据目录，让以后的运行速度飞快
+      - name: Cache NLTK data
+        id: cache-nltk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NLTK_DATA }}
+          key: ${{ runner.os }}-nltk-${{ hashFiles('**/requirements.txt') }} # 一个基于系统和依赖的唯一key
+
+      # 【专家建议 3】安装依赖，并仅在缓存未命中时下载 NLTK 数据
+      - name: Install dependencies and download NLTK data
+        if: steps.cache-nltk.outputs.cache-hit != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install beautifulsoup4 ebooklib pdfplumber nltk markdown2 jinja2 scikit-learn
-          # 使用最明确、最可靠的方式下载NLTK数据
-          python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True); nltk.download('averaged_perceptron_tagger', quiet=True)"
+          # 使用最明确、最可靠的方式，将数据下载到我们指定的环境变量路径
+          python -c "import nltk; nltk.download('punkt', download_dir='${{ env.NLTK_DATA }}'); nltk.download('stopwords', download_dir='${{ env.NLTK_DATA }}'); nltk.download('averaged_perceptron_tagger', download_dir='${{ env.NLTK_DATA }}')"
+
+      - name: Install dependencies from cache
+        if: steps.cache-nltk.outputs.cache-hit == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install beautifulsoup4 ebooklib pdfplumber nltk markdown2 jinja2 scikit-learn
 
       - name: Run magazine collector script
+        # 在运行脚本时，也告诉它 NLTK 数据的准确位置
+        env:
+          NLTK_DATA: ${{ env.NLTK_DATA }}
         run: python ./.github/scripts/collector.py
 
       - name: Upload artifact
