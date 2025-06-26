@@ -20,14 +20,13 @@ logger = logging.getLogger(__name__)
 
 if 'NLTK_DATA' in os.environ:
     nltk.data.path.append(os.environ['NLTK_DATA'])
-    logger.info(f"NLTK_DATA path set to: {os.environ['NLTK_DATA']}")
 else:
     logger.warning("NLTK_DATA environment variable not set. Using default NLTK paths.")
 
 SOURCE_REPO_PATH = Path("source_repo")
 ARTICLES_DIR = Path("articles")
 WEBSITE_DIR = Path("docs")
-NON_ARTICLE_KEYWORDS = ['contents', 'index', 'editor', 'letter', 'subscription', 'classifieds', 'masthead', 'copyright', 'advertisement', 'the world this week', 'back issues', 'contributors']
+NON_ARTICLE_KEYWORDS = ['contents', 'index', 'editor', 'letter', 'subscription', 'classifieds', 'masthead', 'copyright', 'advertisement', 'the world this week', 'back issues', 'contributors', 'about the author']
 
 MAGAZINES = {
     "The Economist": {"folder": "The Economist", "topic": "world_affairs"},
@@ -44,28 +43,54 @@ def setup_directories():
     for info in MAGAZINES.values():
         (ARTICLES_DIR / info['topic']).mkdir(exist_ok=True)
 
-def clean_article_text(text):
-    text = re.sub(r'[\w.-]+@[\w.-]+.\w+', '', text)
-    text = re.sub(r'https?://\S+', '', text)
-    text = re.sub(r'subscribe now|for more information|visit our website|follow us on', '', text, flags=re.IGNORECASE)
-    return re.sub(r'\n\s*\n', '\n\n', text).strip()
-
-def split_text_into_articles(text):
-    ending_punctuations = ('.', '?', '!', '"', '”', '’')
+### [COSMOS ENGINE FIX]: 全新、健壮的文章提取逻辑 ###
+def process_epub_file(epub_path):
+    """
+    深入解析单个EPUB文件，将其中的每个子文档作为潜在文章进行质检。
+    这是解决“无文章”问题的核心。
+    """
+    logger.info(f"正在深入解析: {epub_path.name}")
     articles = []
-    potential_articles = re.split(r'\n\s*(\n\s*){2,}', text) 
-    for article_text in potential_articles:
-        article_text = article_text.strip()
-        if not article_text or not any(article_text.endswith(p) for p in ending_punctuations):
-            continue
-        if sum(1 for keyword in NON_ARTICLE_KEYWORDS if keyword in article_text.lower()[:200]) > 0:
-            continue
-        if len(article_text.split()) < 250:
-            continue
-        articles.append(article_text)
+    try:
+        book = epub.read_epub(str(epub_path))
+        items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
+        
+        for i, item in enumerate(items):
+            soup = BeautifulSoup(item.get_content(), 'html.parser')
+            # 移除所有非文本元素，获取干净的文本
+            for tag in soup(['script', 'style', 'a', 'img']):
+                tag.decompose()
+            
+            text_content = soup.get_text(separator='\n', strip=True)
+            text_content = re.sub(r'\n\s*\n', '\n\n', text_content).strip()
+
+            # --- 文章质检流程 ---
+            # 1. 长度检查
+            if len(text_content.split()) < 250:
+                # logger.debug(f"Item {i} failed length check.")
+                continue
+
+            # 2. 关键词过滤 (检查前300个字符)
+            header_text = text_content[:300].lower()
+            if any(keyword in header_text for keyword in NON_ARTICLE_KEYWORDS):
+                # logger.debug(f"Item {i} failed keyword check.")
+                continue
+
+            # 3. 结构检查 (必须以标点符号结尾)
+            if not text_content.endswith(('.', '?', '!', '"', '”', '’')):
+                # logger.debug(f"Item {i} failed punctuation check.")
+                continue
+            
+            logger.info(f"  -> 从EPUB子文档 {i} 成功提取一篇合格文章。")
+            articles.append(text_content)
+            
+    except Exception as e:
+        logger.error(f"解析EPUB文件 {epub_path.name} 时发生严重错误: {e}")
+    
     return articles
 
 def generate_title_from_content(text_content, all_texts_corpus):
+    # (此函数逻辑保持不变, 依然强大)
     try:
         stop_words = list(stopwords.words('english'))
         stop_words.extend(['would', 'could', 'said', 'also', 'like', 'get', 'one', 'two', 'told', 'mr', 'ms', 'mrs'])
@@ -83,41 +108,19 @@ def generate_title_from_content(text_content, all_texts_corpus):
             pos_tag_list = nltk.pos_tag(nltk.word_tokenize(keyword))
             if not pos_tag_list: continue
             is_good = any(tag.startswith('NN') or tag.startswith('JJ') for word, tag in pos_tag_list)
-            if is_good:
-                good_keywords.append(keyword)
-
-        if len(good_keywords) < 3:
-            return nltk.sent_tokenize(text_content)[0].strip()
-
+            if is_good: good_keywords.append(keyword)
+        
+        if len(good_keywords) < 3: return nltk.sent_tokenize(text_content)[0].strip()
         title = ' '.join(word.capitalize() for word in good_keywords[:5])
         return title
     except Exception as e:
         logger.error(f"AI生成标题失败: {e}")
         return nltk.sent_tokenize(text_content)[0].strip()
 
-def extract_text_from_epub(epub_path):
-    try:
-        book = epub.read_epub(epub_path)
-        content = []
-        for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
-            soup = BeautifulSoup(item.get_content(), 'html.parser')
-            for script in soup(["script", "style"]):
-                script.extract()
-            content.append(soup.get_text(separator='\n', strip=True))
-        return "\n".join(content)
-    except Exception as e:
-        logger.error(f"提取EPUB失败 {epub_path}: {e}")
-        return ""
-
-### FIX: 此函数已修正，解决了f-string中的语法错误。 ###
 def save_article(output_path, text_content, title, author):
     word_count = len(text_content.split())
     reading_time = f"~{round(word_count / 200)} min"
-    
-    # 将标题中的双引号替换为单引号，以避免YAML格式错误
     safe_title = title.replace('"', "'") 
-    
-    # 使用三重引号来构建多行字符串，这是最安全、最清晰的方式
     frontmatter = f"""---
 title: "{safe_title}"
 author: "{author}"
@@ -128,15 +131,14 @@ reading_time: "{reading_time}"
 """
     with output_path.open("w", encoding="utf-8") as f:
         f.write(frontmatter + text_content)
-    logger.info(f"已保存: {output_path.name}")
+    logger.info(f"已保存文章: {output_path.name}")
 
 def process_all_magazines():
     if not SOURCE_REPO_PATH.is_dir():
-        logger.error(f"源仓库目录 '{SOURCE_REPO_PATH}' 未找到！克隆步骤可能失败。")
+        logger.error(f"源仓库目录 '{SOURCE_REPO_PATH}' 未找到！")
         return
 
     all_article_contents = []
-    magazine_contents = {}
     
     for magazine_name, info in MAGAZINES.items():
         source_folder = SOURCE_REPO_PATH / info["folder"]
@@ -150,91 +152,127 @@ def process_all_magazines():
             continue
         
         latest_file_path = epub_files[0]
-        logger.info(f"开始处理最新一期: {latest_file_path.name}")
         
-        full_text = extract_text_from_epub(str(latest_file_path))
-        if full_text:
-            articles = split_text_into_articles(full_text)
-            if articles:
-                unique_stem = f"{magazine_name.replace(' ', '_')}_{latest_file_path.stem}"
-                magazine_contents[unique_stem] = articles
-                all_article_contents.extend(articles)
-            else:
-                logger.warning(f"从 {latest_file_path.name} 中未能拆分出有效文章。")
+        # 使用新的核心函数来处理EPUB
+        articles_from_epub = process_epub_file(latest_file_path)
+        if not articles_from_epub:
+            logger.warning(f"未能从 {latest_file_path.name} 中提取任何合格文章。")
+            continue
 
-    if not magazine_contents:
-        logger.error("处理完成，但未能从任何杂志中成功提取文章。")
-        return
+        # 为后续的AI标题生成准备语料库
+        all_article_contents.extend(articles_from_epub)
 
-    processed_fingerprints = set()
-    for stem, articles_in_magazine in magazine_contents.items():
-        magazine_name_key = stem.split('_')[0].replace('_', ' ')
-        topic = MAGAZINES.get(magazine_name_key, {}).get("topic", "unknown")
-
-        for i, article_content in enumerate(articles_in_magazine):
-            fingerprint = article_content.strip()[:100]
-            if fingerprint in processed_fingerprints:
-                continue
-            processed_fingerprints.add(fingerprint)
-
-            cleaned_content = clean_article_text(article_content)
-            if len(cleaned_content.split()) < 200:
-                continue
-            
-            title = generate_title_from_content(cleaned_content, all_article_contents)
-            author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+)+)', cleaned_content)
+        # 为每一篇提取出的文章生成文件
+        topic = info['topic']
+        stem = f"{magazine_name.replace(' ', '_')}_{latest_file_path.stem}"
+        for i, article_content in enumerate(articles_from_epub):
+            # AI标题生成
+            title = generate_title_from_content(article_content, articles_from_epub)
+            # 作者提取
+            author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+)+)', article_content[:500])
             author = author_match.group(1).strip() if author_match else "N/A"
             
             output_path = ARTICLES_DIR / topic / f"{stem}_art{i+1}.md"
-            save_article(output_path, cleaned_content, title, author)
+            save_article(output_path, article_content, title, author)
 
 def generate_website():
     WEBSITE_DIR.mkdir(exist_ok=True)
     
-    # 优化：使用标准的三重引号字符串，而非f-string，以避免复杂的转义
+    ### [COSMOS ENGINE UPGRADE]: 注入全新、带鼠标交互的粒子宇宙特效 ###
     shared_style_and_script = """
 <style>
     @keyframes gradient-animation { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
     body {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        background: linear-gradient(-45deg, #0a0a0a, #0d1117, #1a1f2c, #0d1117);
-        background-size: 400% 400%; animation: gradient-animation 25s ease infinite;
+        background: linear-gradient(-45deg, #02040a, #0d1117, #0b1021, #0d1117);
+        background-size: 400% 400%; animation: gradient-animation 30s ease infinite;
         color: #c9d1d9; margin: 0; padding: 0; overflow-x: hidden;
     }
-    #tech-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+    #cosmos-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
 </style>
-<canvas id="tech-canvas"></canvas>
+<canvas id="cosmos-canvas"></canvas>
 <script>
-    const canvas = document.getElementById('tech-canvas'), ctx = canvas.getContext('2d');
+    const canvas = document.getElementById('cosmos-canvas'), ctx = canvas.getContext('2d');
     let particles = [];
-    const numParticles = window.innerWidth > 768 ? 100 : 40;
+    const numParticles = window.innerWidth > 768 ? 120 : 50;
+    const mouse = { x: null, y: null, radius: 150 };
+
+    window.addEventListener('mousemove', e => { mouse.x = e.x; mouse.y = e.y; });
+    window.addEventListener('mouseout', () => { mouse.x = null; mouse.y = null; });
+
     function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
+
     class Particle {
-        constructor() { this.x = Math.random() * canvas.width; this.y = Math.random() * canvas.height; this.vx = (Math.random() - 0.5) * 0.5; this.vy = (Math.random() - 0.5) * 0.5; this.size = Math.random() * 1.5 + 0.5; }
-        update() { this.x += this.vx; this.y += this.vy; if (this.x < 0 || this.x > canvas.width) this.vx *= -1; if (this.y < 0 || this.y > canvas.height) this.vy *= -1; }
-        draw() { ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fillStyle = 'rgba(0, 191, 255, 0.7)'; ctx.fill(); }
+        constructor() {
+            this.x = Math.random() * canvas.width;
+            this.y = Math.random() * canvas.height;
+            this.baseX = this.x;
+            this.baseY = this.y;
+            this.density = (Math.random() * 30) + 1;
+            this.size = Math.random() * 2 + 1;
+            this.vx = (Math.random() - 0.5) * 0.5;
+            this.vy = (Math.random() - 0.5) * 0.5;
+        }
+        update() {
+            let dx = mouse.x - this.x;
+            let dy = mouse.y - this.y;
+            let distance = Math.sqrt(dx * dx + dy * dy);
+            let forceDirectionX = dx / distance;
+            let forceDirectionY = dy / distance;
+            let maxDistance = mouse.radius;
+            let force = (maxDistance - distance) / maxDistance;
+            let directionX = 0, directionY = 0;
+
+            if (distance < mouse.radius) {
+                directionX = -forceDirectionX * force * this.density;
+                directionY = -forceDirectionY * force * this.density;
+            }
+            this.x += this.vx + directionX;
+            this.y += this.vy + directionY;
+
+            if (this.x < 0 || this.x > canvas.width) { this.vx *= -1; }
+            if (this.y < 0 || this.y > canvas.height) { this.vy *= -1; }
+        }
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 191, 255, 0.7)';
+            ctx.fill();
+        }
     }
     function init() { for (let i = 0; i < numParticles; i++) particles.push(new Particle()); }
     function connect() {
         for (let i = 0; i < particles.length; i++) {
             for (let j = i; j < particles.length; j++) {
                 const dist = Math.hypot(particles[i].x - particles[j].x, particles[i].y - particles[j].y);
-                if (dist < 120) { ctx.beginPath(); ctx.moveTo(particles[i].x, particles[i].y); ctx.lineTo(particles[j].x, particles[j].y); ctx.strokeStyle = `rgba(0, 191, 255, ${1 - dist / 120})`; ctx.lineWidth = 0.3; ctx.stroke(); }
+                if (dist < 100) {
+                    ctx.beginPath();
+                    ctx.moveTo(particles[i].x, particles[i].y);
+                    ctx.lineTo(particles[j].x, particles[j].y);
+                    ctx.strokeStyle = `rgba(0, 191, 255, ${0.8 - dist / 100})`;
+                    ctx.lineWidth = 0.4;
+                    ctx.stroke();
+                }
             }
         }
     }
-    function animate() { ctx.clearRect(0, 0, canvas.width, canvas.height); particles.forEach(p => { p.update(); p.draw(); }); connect(); requestAnimationFrame(animate); }
+    function animate() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        particles.forEach(p => { p.update(); p.draw(); });
+        connect();
+        requestAnimationFrame(animate);
+    }
     init(); animate();
 </script>
-    """
+"""
 
     index_template_str = """
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Curated Journals</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+<title>AI Curated Journals | Cosmos Engine</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
-    .container { max-width: 1400px; margin: 0 auto; padding: 4rem 2rem; }
+    .container { max-width: 1400px; margin: 0 auto; padding: 4rem 2rem; position: relative; z-index: 1; }
     h1 { font-size: clamp(2.5rem, 8vw, 5rem); text-align: center; margin-bottom: 5rem; color: #fff; text-shadow: 0 0 25px rgba(0, 191, 255, 0.5), 0 0 50px rgba(0, 191, 255, 0.3); }
     .grid { display: grid; gap: 2.5rem; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); }
     .card { backdrop-filter: blur(16px) saturate(180%); -webkit-backdrop-filter: blur(16px) saturate(180%); background: rgba(17, 25, 40, 0.75); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.125); padding: 2rem; transition: all 0.4s ease; display: flex; flex-direction: column; }
@@ -244,7 +282,7 @@ def generate_website():
     .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
     .read-link { color:#58a6ff; text-decoration:none; font-weight: 500; } .read-link:hover { color: #fff; text-decoration: underline; }
     .no-articles { text-align:center; padding:5rem; background-color:rgba(17, 25, 40, 0.8); border-radius:16px; }
-</style></head><body><div class="container"><h1>AI Curated Journals</h1><div class="grid">
+</style></head><body>""" + shared_style_and_script + """<div class="container"><h1>AI Curated Journals</h1><div class="grid">
 {% for article in articles %}
 <div class="card">
     <h3 class="card-title">{{ article.title }}</h3>
@@ -252,22 +290,22 @@ def generate_website():
     <div class="card-footer"><span style="color:#8b949e;">By {{ article.author }}</span><a href="{{ article.url }}" class="read-link">Read Article →</a></div>
 </div>
 {% endfor %}
-</div>{% if not articles %}<div class="no-articles"><h2>No Articles Found</h2><p>The system is running, but no new articles were processed in this cycle.</p></div>{% endif %}
-</div>""" + shared_style_and_script + """</body></html>"""
+</div>{% if not articles %}<div class="no-articles"><h2>No Articles Found</h2><p>The Cosmos Engine is running, but no new articles were processed in this cycle.</p></div>{% endif %}
+</div></body></html>"""
 
     article_html_template = """
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 <style>
-    .container { max-width: 720px; margin: 6rem auto; padding: clamp(2rem, 5vw, 4rem); backdrop-filter: blur(16px) saturate(180%); -webkit-backdrop-filter: blur(16px) saturate(180%); background-color: rgba(17, 25, 40, 0.85); border-radius: 16px; border: 1px solid rgba(255,255,255,0.125); }
+    .container { max-width: 720px; margin: 6rem auto; padding: clamp(2rem, 5vw, 4rem); backdrop-filter: blur(16px) saturate(180%); -webkit-backdrop-filter: blur(16px) saturate(180%); background-color: rgba(17, 25, 40, 0.85); border-radius: 16px; border: 1px solid rgba(255,255,255,0.125); position: relative; z-index: 1; }
     .back-link { font-family: 'Inter', sans-serif; display: inline-block; margin-bottom: 3rem; text-decoration: none; color: #8892b0; transition: color 0.3s; } .back-link:hover { color: #58a6ff; }
     h1 { font-family: 'Inter', sans-serif; font-size: clamp(2rem, 6vw, 3.2rem); line-height: 1.2; color: #fff; margin:0; }
     .article-meta { font-family: 'Inter', sans-serif; color: #8892b0; margin: 1.5rem 0 3rem 0; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 2rem; font-size: 0.9rem; }
     .article-body { font-family: 'Lora', serif; font-size: 1.15rem; line-height: 2; color: #c9d1d9; }
     .article-body p { margin: 0 0 1.5em 0; } .article-body h2, .article-body h3 { font-family: 'Inter', sans-serif; color: #fff; }
-</style></head><body><div class="container"><a href="index.html" class="back-link">← Back to Journal List</a><h1>{{ title }}</h1>
+</style></head><body>""" + shared_style_and_script + """<div class="container"><a href="index.html" class="back-link">← Back to Journal List</a><h1>{{ title }}</h1>
 <p class="article-meta">By {{ author }} · From {{ magazine }} · {{ reading_time }}</p>
-<div class="article-body">{{ content }}</div></div>""" + shared_style_and_script + """</body></html>"""
+<div class="article-body">{{ content }}</div></div></body></html>"""
 
     articles_data = []
     md_files = glob.glob(str(ARTICLES_DIR / '**/*.md'), recursive=True)
@@ -276,10 +314,8 @@ def generate_website():
         md_file = Path(md_file_path)
         try:
             with md_file.open('r', encoding='utf-8') as f: content_with_frontmatter = f.read()
-            
             parts = content_with_frontmatter.split('---', 2)
             if len(parts) < 3: continue
-
             frontmatter, content = parts[1], parts[2]
             title = re.search(r'title: "?(.*?)"?\n', frontmatter).group(1)
             author = re.search(r'author: "?(.*?)"?\n', frontmatter).group(1)
