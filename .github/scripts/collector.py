@@ -36,50 +36,31 @@ def setup_directories():
         (ARTICLES_DIR / info['topic']).mkdir(exist_ok=True)
 
 def clean_article_text(text):
-    """【新增】使用正则表达式清洗文章内容，去除常见噪音。"""
-    text = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '', text) # 去除Email
-    text = re.sub(r'https?://\S+', '', text) # 去除网址
+    text = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '', text)
+    text = re.sub(r'https?://\S+', '', text)
     text = re.sub(r'subscribe now|for more information|visit our website|follow us on', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'Page\s+\d+', '', text) # 去除页码
-    text = re.sub(r'\n\s*\n', '\n\n', text) # 规范化空行
+    text = re.sub(r'Page\s+\d+', '', text)
+    text = re.sub(r'\n\s*\n', '\n\n', text)
     return text.strip()
 
 def split_text_into_articles(text):
-    """【升级版】更严格的文章切分，保证内容和结尾的完整性。"""
     ending_punctuations = ('.', '?', '!', '"', '”', '’')
     potential_articles = re.split(r'\n\s*\n\s*\n+', text)
     articles = []
     for article_text in potential_articles:
         article_text = article_text.strip()
         if not article_text: continue
-
-        # 质检1: 结尾是否完整
-        if not article_text.endswith(ending_punctuations):
-            # logger.info("文章结尾不完整，已过滤。")
-            continue
-            
-        # 质检2: 是否包含太多黑名单词汇
+        if not article_text.endswith(ending_punctuations): continue
         lower_text = article_text.lower()
-        if sum(1 for keyword in NON_ARTICLE_KEYWORDS if keyword in lower_text) > 1:
-            # logger.info("文本块包含过多非文章关键词，已过滤。")
-            continue
-
-        # 质检3: 长度是否达标
-        if len(article_text.split()) < 250: # 标准再次提高
-            continue
-
-        # 质检4: 标题是否合理
+        if sum(1 for keyword in NON_ARTICLE_KEYWORDS if keyword in lower_text) > 1: continue
+        if len(article_text.split()) < 250: continue
         first_line = article_text.split('\n')[0].strip()
-        if len(first_line) > 150 or len(first_line) < 10:
-            continue
-            
+        if len(first_line) > 150 or len(first_line) < 10: continue
         articles.append(article_text)
-    
     if not articles: logger.warning("本次未能从文本中识别出任何符合质量标准的完整文章。")
     return articles
 
 def extract_title_from_text(text_content):
-    # ... (此函数保持不变) ...
     lines = text_content.strip().split('\n')
     best_candidate = ""
     highest_score = -1
@@ -88,11 +69,11 @@ def extract_title_from_text(text_content):
         words = line.split()
         word_count = len(words)
         if not (2 < word_count < 20): continue
-        if line[0].islower(): continue
-        if line.endswith('.') or line.endswith(',') or line.endswith(':'): continue
+        if line and line[0].islower(): continue
+        if line.endswith(('.', ',', ':')): continue
         score = 0
-        title_case_words = sum(1 for word in words if word[0].isupper())
-        if title_case_words / word_count > 0.6: score += 5
+        title_case_words = sum(1 for word in words if word and word[0].isupper())
+        if word_count > 0 and title_case_words / word_count > 0.6: score += 5
         if line.isupper(): score -= 3
         score += word_count
         if score > highest_score:
@@ -102,16 +83,26 @@ def extract_title_from_text(text_content):
     return best_candidate.replace('#', '').strip()
 
 def process_all_magazines():
-    # ... (前面的代码不变) ...
+    if not SOURCE_REPO_PATH.is_dir():
+        logger.error(f"源仓库目录 '{SOURCE_REPO_PATH}' 未找到!")
+        return
     try: nltk.data.find('tokenizers/punkt')
     except LookupError: nltk.download('punkt')
     
     processed_fingerprints = set()
     for magazine_name, info in MAGAZINES.items():
-        # ... (扫描文件夹的代码不变) ...
+        # ↓↓↓↓↓↓ 我把这行被我误删的代码加回来了 ↓↓↓↓↓↓
+        source_folder = SOURCE_REPO_PATH / info["folder"]
+        # ↑↑↑↑↑↑ 我把这行被我误删的代码加回来了 ↑↑↑↑↑↑
+        topic = info["topic"]
+        logger.info(f"--- 正在扫描: {source_folder} ---")
+        if not source_folder.is_dir(): continue
+
         for file_path in source_folder.rglob('*.epub'):
             if magazine_name in file_path.name.lower():
-                # ... (检查是否已处理的逻辑不变) ...
+                check_path = ARTICLES_DIR / topic / f"{file_path.stem}_art_1.md"
+                if check_path.exists(): continue
+                logger.info(f"处理新杂志: {file_path.name}")
                 try:
                     full_text = extract_text_from_epub(str(file_path))
                     if full_text:
@@ -120,22 +111,16 @@ def process_all_magazines():
                             fingerprint = article_content.strip()[:60]
                             if fingerprint in processed_fingerprints: continue
                             processed_fingerprints.add(fingerprint)
-
-                            # 【新增】在提取标题和作者前，先对内容进行清洗
                             cleaned_content = clean_article_text(article_content)
-                            if len(cleaned_content.split()) < 200: continue # 清洗后再次检查长度
-
+                            if len(cleaned_content.split()) < 200: continue
                             title = extract_title_from_text(cleaned_content)
                             author_match = re.search(r'By\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)', cleaned_content)
                             author = author_match.group(1) if author_match else "N/A"
-                            
                             article_md_filename = f"{file_path.stem}_art_{i+1}.md"
                             output_path = ARTICLES_DIR / topic / article_md_filename
                             save_article(output_path, cleaned_content, title, author)
                 except Exception as e:
                     logger.error(f"处理文件 {file_path.name} 时出错: {e}")
-
-# ... (extract_text_from_epub, save_article, generate_website 等函数保持不变) ...
 
 def extract_text_from_epub(epub_path):
     try:
@@ -149,7 +134,6 @@ def save_article(output_path, text_content, title, author):
     logger.info(f"已保存: {output_path.name} (作者: {author})")
 
 def generate_website():
-    # ... (generate_website 的代码完全可以保持不变，因为它只负责展示，不负责内容质量) ...
     WEBSITE_DIR.mkdir(exist_ok=True)
     index_template_str = """
     <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
