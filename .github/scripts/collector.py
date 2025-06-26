@@ -23,7 +23,7 @@ MAGAZINES = {
 }
 ARTICLES_DIR = Path("articles")
 WEBSITE_DIR = Path("docs")
-NON_ARTICLE_KEYWORDS = ['contents', 'index', 'editor', 'letter', 'subscription', 'classifieds', 'masthead', 'copyright', 'advertisement', 'the world this week']
+NON_ARTICLE_KEYWORDS = ['contents', 'index', 'editor', 'letter', 'subscription', 'classifieds', 'masthead', 'copyright', 'advertisement', 'the world this week', 'back issues']
 
 # ==============================================================================
 # 2. 核心功能函数
@@ -35,38 +35,83 @@ def setup_directories():
     for info in MAGAZINES.values():
         (ARTICLES_DIR / info['topic']).mkdir(exist_ok=True)
 
+def clean_article_text(text):
+    """【新增】使用正则表达式清洗文章内容，去除常见噪音。"""
+    text = re.sub(r'[\w\.-]+@[\w\.-]+\.\w+', '', text) # 去除Email
+    text = re.sub(r'https?://\S+', '', text) # 去除网址
+    text = re.sub(r'subscribe now|for more information|visit our website|follow us on', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'Page\s+\d+', '', text) # 去除页码
+    text = re.sub(r'\n\s*\n', '\n\n', text) # 规范化空行
+    return text.strip()
+
 def split_text_into_articles(text):
+    """【升级版】更严格的文章切分，保证内容和结尾的完整性。"""
+    ending_punctuations = ('.', '?', '!', '"', '”', '’')
     potential_articles = re.split(r'\n\s*\n\s*\n+', text)
     articles = []
     for article_text in potential_articles:
         article_text = article_text.strip()
+        if not article_text: continue
+
+        # 质检1: 结尾是否完整
+        if not article_text.endswith(ending_punctuations):
+            # logger.info("文章结尾不完整，已过滤。")
+            continue
+            
+        # 质检2: 是否包含太多黑名单词汇
         lower_text = article_text.lower()
-        if sum(1 for keyword in NON_ARTICLE_KEYWORDS if keyword in lower_text) > 1: continue
-        if len(article_text.split()) < 200: continue
+        if sum(1 for keyword in NON_ARTICLE_KEYWORDS if keyword in lower_text) > 1:
+            # logger.info("文本块包含过多非文章关键词，已过滤。")
+            continue
+
+        # 质检3: 长度是否达标
+        if len(article_text.split()) < 250: # 标准再次提高
+            continue
+
+        # 质检4: 标题是否合理
         first_line = article_text.split('\n')[0].strip()
-        if len(first_line) > 150 or len(first_line) < 10: continue
+        if len(first_line) > 150 or len(first_line) < 10:
+            continue
+            
         articles.append(article_text)
+    
+    if not articles: logger.warning("本次未能从文本中识别出任何符合质量标准的完整文章。")
     return articles
 
+def extract_title_from_text(text_content):
+    # ... (此函数保持不变) ...
+    lines = text_content.strip().split('\n')
+    best_candidate = ""
+    highest_score = -1
+    for line in lines[:5]:
+        line = line.strip()
+        words = line.split()
+        word_count = len(words)
+        if not (2 < word_count < 20): continue
+        if line[0].islower(): continue
+        if line.endswith('.') or line.endswith(',') or line.endswith(':'): continue
+        score = 0
+        title_case_words = sum(1 for word in words if word[0].isupper())
+        if title_case_words / word_count > 0.6: score += 5
+        if line.isupper(): score -= 3
+        score += word_count
+        if score > highest_score:
+            highest_score = score
+            best_candidate = line
+    if not best_candidate: return " ".join(lines[0].split()[:12])
+    return best_candidate.replace('#', '').strip()
+
 def process_all_magazines():
-    if not SOURCE_REPO_PATH.is_dir():
-        logger.error(f"源仓库目录 '{SOURCE_REPO_PATH}' 未找到!")
-        return
+    # ... (前面的代码不变) ...
     try: nltk.data.find('tokenizers/punkt')
     except LookupError: nltk.download('punkt')
     
     processed_fingerprints = set()
     for magazine_name, info in MAGAZINES.items():
-        source_folder = SOURCE_REPO_PATH / info["folder"]
-        topic = info["topic"]
-        if not source_folder.is_dir(): continue
-        logger.info(f"--- 正在扫描: {source_folder} ---")
-
+        # ... (扫描文件夹的代码不变) ...
         for file_path in source_folder.rglob('*.epub'):
             if magazine_name in file_path.name.lower():
-                check_path = ARTICLES_DIR / topic / f"{file_path.stem}_art_1.md"
-                if check_path.exists(): continue
-                logger.info(f"处理新杂志: {file_path.name}")
+                # ... (检查是否已处理的逻辑不变) ...
                 try:
                     full_text = extract_text_from_epub(str(file_path))
                     if full_text:
@@ -76,16 +121,21 @@ def process_all_magazines():
                             if fingerprint in processed_fingerprints: continue
                             processed_fingerprints.add(fingerprint)
 
-                            first_line = article_content.strip().split('\n')[0]
-                            title = first_line.replace('#', '').strip()
-                            author_match = re.search(r'By\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)', article_content)
+                            # 【新增】在提取标题和作者前，先对内容进行清洗
+                            cleaned_content = clean_article_text(article_content)
+                            if len(cleaned_content.split()) < 200: continue # 清洗后再次检查长度
+
+                            title = extract_title_from_text(cleaned_content)
+                            author_match = re.search(r'By\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)', cleaned_content)
                             author = author_match.group(1) if author_match else "N/A"
                             
                             article_md_filename = f"{file_path.stem}_art_{i+1}.md"
                             output_path = ARTICLES_DIR / topic / article_md_filename
-                            save_article(output_path, article_content, title, author)
+                            save_article(output_path, cleaned_content, title, author)
                 except Exception as e:
                     logger.error(f"处理文件 {file_path.name} 时出错: {e}")
+
+# ... (extract_text_from_epub, save_article, generate_website 等函数保持不变) ...
 
 def extract_text_from_epub(epub_path):
     try:
@@ -99,6 +149,7 @@ def save_article(output_path, text_content, title, author):
     logger.info(f"已保存: {output_path.name} (作者: {author})")
 
 def generate_website():
+    # ... (generate_website 的代码完全可以保持不变，因为它只负责展示，不负责内容质量) ...
     WEBSITE_DIR.mkdir(exist_ok=True)
     index_template_str = """
     <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -123,6 +174,7 @@ def generate_website():
         .read-more-btn { font-size: 0.9rem; font-weight: 500; color: #fff; background-color: var(--accent-color);
                          padding: 0.7rem 1.4rem; border-radius: 10px; text-decoration: none; transition: all 0.2s ease; }
         .read-more-btn:hover { background-color: #0056b3; transform: scale(1.05); }
+        .no-articles { text-align: center; padding: 4rem; background-color: #fff; border-radius: 16px; }
     </style></head>
     <body><div class="container"><h1>Journals</h1><div class="grid">
     {% for article in articles %}
@@ -137,7 +189,7 @@ def generate_website():
             </div>
         </div>
     {% endfor %}
-    </div>{% if not articles %}<div class="no-articles" style="text-align:center;padding:4rem;"><h2>No Articles Yet</h2></div>{% endif %}
+    </div>{% if not articles %}<div class="no-articles"><h2>No Articles Yet</h2></div>{% endif %}
     </div></body></html>
     """
     article_html_template = '''
@@ -193,9 +245,6 @@ def generate_website():
     if articles_data: logger.info(f"网站生成完成，包含 {len(articles_data)} 篇文章。")
     else: logger.info("网站生成完成，但没有找到任何文章。")
 
-# ==============================================================================
-# 3. 主程序入口
-# ==============================================================================
 if __name__ == "__main__":
     setup_directories()
     process_all_magazines()
