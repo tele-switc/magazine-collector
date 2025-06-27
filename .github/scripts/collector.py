@@ -32,7 +32,6 @@ NON_ARTICLE_KEYWORDS = [
     'back issues', 'contributors', 'about the author'
 ]
 
-# --- 使用灵活的 match_key 进行匹配 ---
 MAGAZINES = {
     "The Economist": {"match_key": "economist", "topic": "world_affairs"},
     "Wired":         {"match_key": "wired", "topic": "technology"},
@@ -86,6 +85,7 @@ def save_article(output_path, text_content, title, author):
     frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
     output_path.write_text(frontmatter + text_content, encoding="utf-8")
 
+### [终极决战版诊断] ###
 def process_all_magazines():
     logger.info("--- 开始文章提取流程 ---")
     
@@ -99,18 +99,32 @@ def process_all_magazines():
         return
 
     magazine_epubs = {name: [] for name in MAGAZINES}
+    logger.info("="*60)
+    logger.info(">>>  进入终极文件分组诊断  <<<")
+    logger.info("="*60)
     for path in found_epubs:
         path_str_lower = str(path).lower()
+        matched_this_file = False
         for name, info in MAGAZINES.items():
-            if info["match_key"] in path_str_lower:
+            search_keyword = info["match_key"]
+            if search_keyword in path_str_lower:
+                logger.info(f"[匹配成功] 关键词 '{search_keyword}' 在路径 '{path_str_lower}' 中找到。")
                 magazine_epubs[name].append(path)
+                matched_this_file = True
                 break
-    
+            else:
+                logger.info(f"[匹配失败] 关键词 '{search_keyword}' 未在路径 '{path_str_lower}' 中找到。")
+        if not matched_this_file:
+            logger.warning(f"  [警告] 文件 '{path.name}' 未能匹配任何杂志关键词。")
+    logger.info("="*60)
+    logger.info(">>>  文件分组诊断结束  <<<")
+    for name, paths in magazine_epubs.items():
+        logger.info(f"  -> 杂志 '{name}' 被分配了 {len(paths)} 个文件。")
+    logger.info("="*60)
+
     total_articles_extracted = 0
     for magazine_name, epub_paths in magazine_epubs.items():
-        if not epub_paths:
-            logger.info(f"杂志 '{magazine_name}' 没有找到可处理的EPUB文件，跳过。")
-            continue
+        if not epub_paths: continue
         
         logger.info(f"\n>>> 处理杂志: {magazine_name}")
         latest_file_path = sorted(epub_paths, key=lambda p: p.name, reverse=True)[0]
@@ -134,14 +148,16 @@ def process_all_magazines():
             
     logger.info(f"\n--- 文章提取流程结束。共提取了 {total_articles_extracted} 篇新文章。 ---")
 
+
 def generate_website():
-    logger.info("--- 开始生成网站 (本地化) ---")
+    logger.info("--- 开始生成网站 (视觉最终版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     
+    ### [视觉最终版] 秀丽字体 + 极致透明 ###
     shared_style_and_script = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@500;700&family=Lora:wght@400;700&display=swap');
-    body { background-color: #02040a; color: #e6edf3; margin: 0; }
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Serif+Pro:wght@400;700&display=swap');
+    body { background-color: #010409; color: #e6edf3; margin: 0; }
     #dynamic-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
 </style>
 <canvas id="dynamic-canvas"></canvas>
@@ -153,26 +169,26 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>外刊阅读</title>""" + shared_style_and_script + """
 <style>
-    .container { max-width: 1400px; margin: 0 auto; padding: 4rem 2rem; position: relative; z-index: 1; }
-    h1, .card-title { font-family: 'Lexend', sans-serif; }
-    .card-meta, .card-footer, .read-link, .no-articles { font-family: 'Lexend', sans-serif; }
-    h1 { font-size: clamp(2.5rem, 6vw, 4rem); text-align: center; margin-bottom: 5rem; color: #fff; font-weight: 700; text-shadow: 0 0 25px rgba(0, 191, 255, 0.4); }
-    .grid { display: grid; gap: 2.5rem; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); }
+    .container { max-width: 1400px; margin: 0 auto; padding: 5rem 2rem; position: relative; z-index: 1; }
+    h1, .card-title { font-family: 'Playfair Display', serif; }
+    .card-meta, .card-footer, .read-link, .no-articles { font-family: 'Source Serif Pro', serif; }
+    h1 { font-size: clamp(3rem, 7vw, 5rem); text-align: center; margin-bottom: 6rem; color: #fff; font-weight: 700; text-shadow: 0 0 30px rgba(0, 191, 255, 0.4); }
+    .grid { display: grid; gap: 3rem; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); }
     .card {
-        background: rgba(255, 255, 255, 0.04); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
-        border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 18px; padding: 2rem;
-        box-shadow: 0 8px 32px 0 rgba(2, 4, 10, 0.3); transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+        background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(50px); -webkit-backdrop-filter: blur(50px);
+        border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; padding: 2.5rem;
+        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1); transition: all 0.4s ease;
         display: flex; flex-direction: column;
     }
     .card:hover {
-        transform: translateY(-12px) scale(1.03); border: 1px solid transparent; background: rgba(255, 255, 255, 0.08);
-        box-shadow: 0 16px 50px 0 rgba(0, 127, 255, 0.25); border-image: linear-gradient(145deg, rgba(0, 191, 255, 0.8), rgba(255, 255, 255, 0.2)) 1;
+        transform: translateY(-15px); background: rgba(255, 255, 255, 0.05);
+        box-shadow: 0 20px 50px rgba(0, 127, 255, 0.2); border-color: rgba(255, 255, 255, 0.2);
     }
-    .card-title { font-size: 1.25rem; font-weight: 500; line-height: 1.4; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
-    .card-meta { color: #a3b3c6; font-size: 0.8rem; font-weight: 400; }
-    .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
-    .read-link { color:#58a6ff; text-decoration:none; font-weight: 500; font-size: 0.9rem; }
-    .no-articles { background: rgba(255, 255, 255, 0.04); backdrop-filter: blur(30px); border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.15); text-align:center; padding:5rem 2rem; color: #a3b3c6;}
+    .card-title { font-size: 1.5rem; font-weight: 700; line-height: 1.3; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
+    .card-meta { color: #b0c4de; font-size: 0.9rem; }
+    .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+    .read-link { color:#87ceeb; text-decoration:none; font-weight: 700; font-size: 0.9rem; }
+    .no-articles { background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(50px); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1); text-align:center; padding:5rem 2rem; color: #b0c4de;}
 </style></head><body><div class="container"><h1>外刊阅读</h1><div class="grid">
 {% for article in articles %}<div class="card"><h3 class="card-title">{{ article.title }}</h3><p class="card-meta">{{ article.magazine }} · {{ article.reading_time }}</p><div class="card-footer"><span class="card-meta">By {{ article.author }}</span><a href="{{ article.url }}" class="read-link">阅读 →</a></div></div>{% endfor %}
 </div>{% if not articles %}<div class="no-articles"><h2>未发现文章</h2><p>引擎已运行，但本次未处理新的文章。</p></div>{% endif %}</div></body></html>"""
@@ -181,20 +197,21 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }} | 外刊阅读</title>""" + shared_style_and_script + """
 <style>
     .article-container {
-        max-width: 720px; margin: 6rem auto; padding: clamp(2rem, 5vw, 4rem);
-        background: rgba(255, 255, 255, 0.06); backdrop-filter: blur(35px); -webkit-backdrop-filter: blur(35px);
-        border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.15);
-        position: relative; z-index: 1; box-shadow: 0 8px 32px 0 rgba(2, 4, 10, 0.35);
+        max-width: 720px; margin: 6rem auto; padding: clamp(3rem, 6vw, 5rem);
+        background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(50px); -webkit-backdrop-filter: blur(50px);
+        border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1);
+        position: relative; z-index: 1; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
     }
-    .back-link, .article-meta, h1 { font-family: 'Lexend', sans-serif; }
-    .article-body { font-family: 'Lora', serif; }
-    .back-link { display: inline-block; margin-bottom: 3rem; text-decoration: none; color: #a3b3c6; transition: color 0.3s; } .back-link:hover { color: #58a6ff; }
-    h1 { font-size: clamp(1.8rem, 5vw, 2.8rem); line-height: 1.2; color: #fff; margin:0; font-weight: 700; }
-    .article-meta { color: #a3b3c6; margin: 1.5rem 0 3rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 2rem; font-size: 0.9rem; }
-    .article-body { font-size: 1.15rem; line-height: 1.9; color: #d0d8e0; }
-    .article-body p { margin: 0 0 1.5em 0; }
+    .back-link, .article-meta, h1 { font-family: 'Playfair Display', serif; }
+    .article-body { font-family: 'Source Serif Pro', serif; }
+    .back-link { display: inline-block; margin-bottom: 3rem; text-decoration: none; color: #b0c4de; transition: color 0.3s; } .back-link:hover { color: #87ceeb; }
+    h1 { font-size: clamp(2.2rem, 6vw, 3.5rem); line-height: 1.2; color: #fff; margin:0; font-weight: 700; }
+    .article-meta { color: #b0c4de; margin: 2rem 0 3rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 2rem; font-size: 1rem; }
+    .article-body { font-size: 1.15rem; line-height: 2; color: #d1d9e0; }
+    .article-body p { margin: 0 0 1.75em 0; }
 </style></head><body><div class="article-container"><a href="index.html" class="back-link">← 返回列表</a><h1>{{ title }}</h1><p class="article-meta">By {{ author }} · From {{ magazine }} · {{ reading_time }}</p><div class="article-body">{{ content }}</div></div></body></html>"""
 
+    # ... (模板渲染逻辑保持不变)
     articles_data = []
     md_files = glob.glob(str(ARTICLES_DIR / '**/*.md'), recursive=True)
     logger.info(f"找到 {len(md_files)} 个 Markdown 文件用于生成网页。")
