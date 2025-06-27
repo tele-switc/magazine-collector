@@ -32,7 +32,7 @@ NON_ARTICLE_KEYWORDS = [
     'back issues', 'contributors', 'about the author'
 ]
 
-# --- 胜利修复：使用更灵活的 match_key 进行匹配 ---
+# --- 使用灵活的 match_key 进行匹配 ---
 MAGAZINES = {
     "The Economist": {"match_key": "economist", "topic": "world_affairs"},
     "Wired":         {"match_key": "wired", "topic": "technology"},
@@ -102,7 +102,6 @@ def process_all_magazines():
     for path in found_epubs:
         path_str_lower = str(path).lower()
         for name, info in MAGAZINES.items():
-            # --- 胜利修复：使用 match_key 进行匹配 ---
             if info["match_key"] in path_str_lower:
                 magazine_epubs[name].append(path)
                 break
@@ -136,7 +135,7 @@ def process_all_magazines():
     logger.info(f"\n--- 文章提取流程结束。共提取了 {total_articles_extracted} 篇新文章。 ---")
 
 def generate_website():
-    logger.info("--- 开始生成网站 (字体升级版) ---")
+    logger.info("--- 开始生成网站 (本地化) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     
     shared_style_and_script = """
@@ -152,7 +151,7 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
 
     index_template_str = """
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Curated Journals | Cosmos Engine</title>""" + shared_style_and_script + """
+<title>外刊阅读</title>""" + shared_style_and_script + """
 <style>
     .container { max-width: 1400px; margin: 0 auto; padding: 4rem 2rem; position: relative; z-index: 1; }
     h1, .card-title { font-family: 'Lexend', sans-serif; }
@@ -174,12 +173,12 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
     .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
     .read-link { color:#58a6ff; text-decoration:none; font-weight: 500; font-size: 0.9rem; }
     .no-articles { background: rgba(255, 255, 255, 0.04); backdrop-filter: blur(30px); border-radius: 18px; border: 1px solid rgba(255, 255, 255, 0.15); text-align:center; padding:5rem 2rem; color: #a3b3c6;}
-</style></head><body><div class="container"><h1>AI Curated Journals</h1><div class="grid">
-{% for article in articles %}<div class="card"><h3 class="card-title">{{ article.title }}</h3><p class="card-meta">{{ article.magazine }} · {{ article.reading_time }}</p><div class="card-footer"><span class="card-meta">By {{ article.author }}</span><a href="{{ article.url }}" class="read-link">Read →</a></div></div>{% endfor %}
-</div>{% if not articles %}<div class="no-articles"><h2>No Articles Found</h2><p>The Cosmos Engine ran successfully, but no new articles were processed in this cycle. Please check the source repository.</p></div>{% endif %}</div></body></html>"""
+</style></head><body><div class="container"><h1>外刊阅读</h1><div class="grid">
+{% for article in articles %}<div class="card"><h3 class="card-title">{{ article.title }}</h3><p class="card-meta">{{ article.magazine }} · {{ article.reading_time }}</p><div class="card-footer"><span class="card-meta">By {{ article.author }}</span><a href="{{ article.url }}" class="read-link">阅读 →</a></div></div>{% endfor %}
+</div>{% if not articles %}<div class="no-articles"><h2>未发现文章</h2><p>引擎已运行，但本次未处理新的文章。</p></div>{% endif %}</div></body></html>"""
 
     article_html_template = """
-<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }}</title>""" + shared_style_and_script + """
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }} | 外刊阅读</title>""" + shared_style_and_script + """
 <style>
     .article-container {
         max-width: 720px; margin: 6rem auto; padding: clamp(2rem, 5vw, 4rem);
@@ -194,7 +193,7 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
     .article-meta { color: #a3b3c6; margin: 1.5rem 0 3rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 2rem; font-size: 0.9rem; }
     .article-body { font-size: 1.15rem; line-height: 1.9; color: #d0d8e0; }
     .article-body p { margin: 0 0 1.5em 0; }
-</style></head><body><div class="article-container"><a href="index.html" class="back-link">← Back to Journals</a><h1>{{ title }}</h1><p class="article-meta">By {{ author }} · From {{ magazine }} · {{ reading_time }}</p><div class="article-body">{{ content }}</div></div></body></html>"""
+</style></head><body><div class="article-container"><a href="index.html" class="back-link">← 返回列表</a><h1>{{ title }}</h1><p class="article-meta">By {{ author }} · From {{ magazine }} · {{ reading_time }}</p><div class="article-body">{{ content }}</div></div></body></html>"""
 
     articles_data = []
     md_files = glob.glob(str(ARTICLES_DIR / '**/*.md'), recursive=True)
