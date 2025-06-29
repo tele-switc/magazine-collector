@@ -85,9 +85,9 @@ def save_article(output_path, text_content, title, author):
     frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
     output_path.write_text(frontmatter + text_content, encoding="utf-8")
 
-### [终极决战版诊断] ###
+### [胜利最终版] 引入智能过滤和排序，并保留容错回退机制 ###
 def process_all_magazines():
-    logger.info("--- 开始文章提取流程 ---")
+    logger.info("--- 开始文章提取流程 (最终版 v2) ---")
     
     if not SOURCE_REPO_PATH.is_dir():
         logger.error(f"致命错误: 源仓库目录 '{SOURCE_REPO_PATH}' 不存在！")
@@ -99,64 +99,73 @@ def process_all_magazines():
         return
 
     magazine_epubs = {name: [] for name in MAGAZINES}
-    logger.info("="*60)
-    logger.info(">>>  进入终极文件分组诊断  <<<")
-    logger.info("="*60)
     for path in found_epubs:
         path_str_lower = str(path).lower()
-        matched_this_file = False
         for name, info in MAGAZINES.items():
-            search_keyword = info["match_key"]
-            if search_keyword in path_str_lower:
-                logger.info(f"[匹配成功] 关键词 '{search_keyword}' 在路径 '{path_str_lower}' 中找到。")
+            if info["match_key"] in path_str_lower:
                 magazine_epubs[name].append(path)
-                matched_this_file = True
                 break
-            else:
-                logger.info(f"[匹配失败] 关键词 '{search_keyword}' 未在路径 '{path_str_lower}' 中找到。")
-        if not matched_this_file:
-            logger.warning(f"  [警告] 文件 '{path.name}' 未能匹配任何杂志关键词。")
-    logger.info("="*60)
-    logger.info(">>>  文件分组诊断结束  <<<")
-    for name, paths in magazine_epubs.items():
-        logger.info(f"  -> 杂志 '{name}' 被分配了 {len(paths)} 个文件。")
-    logger.info("="*60)
-
+    
     total_articles_extracted = 0
     for magazine_name, epub_paths in magazine_epubs.items():
-        if not epub_paths: continue
-        
-        logger.info(f"\n>>> 处理杂志: {magazine_name}")
-        latest_file_path = sorted(epub_paths, key=lambda p: p.name, reverse=True)[0]
-        logger.info(f"  处理最新文件: {latest_file_path.name}")
-        
-        articles = process_epub_file(latest_file_path)
-        if not articles:
-            logger.warning(f"  未能从 {latest_file_path.name} 提取文章。")
+        if not epub_paths:
+            logger.info(f"杂志 '{magazine_name}' 没有找到可处理的EPUB文件，跳过。")
             continue
         
-        logger.info(f"  成功提取 {len(articles)} 篇文章。")
-        for i, article_content in enumerate(articles):
-            title = generate_title_from_content(article_content, articles)
-            author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+){1,3})', article_content[:600])
-            author = author_match.group(1).strip() if author_match else "Source"
-            stem = f"{magazine_name.replace(' ', '_')}_{latest_file_path.stem.replace(' ', '_')}"
-            output_path = ARTICLES_DIR / MAGAZINES[magazine_name]['topic'] / f"{stem}_art{i+1}.md"
-            save_article(output_path, article_content, title, author)
-            total_articles_extracted += 1
-            logger.info(f"    -> 已保存: {output_path.name}")
+        logger.info(f"\n>>> 处理杂志: {magazine_name}")
+        
+        # --- 智能过滤与排序 ---
+        # 1. 优先选择文件名中包含下划线的标准格式文件
+        standard_files = [p for p in epub_paths if '_' in p.name]
+        # 2. 如果没有标准文件，才使用所有文件
+        files_to_process = standard_files if standard_files else epub_paths
+        
+        # 3. 对筛选后的文件列表进行排序
+        sorted_epub_paths = sorted(files_to_process, key=lambda p: p.name, reverse=True)
+        
+        if not sorted_epub_paths:
+            logger.warning(f"  杂志 '{magazine_name}' 没有找到符合格式的文件可供处理。")
+            continue
+
+        # --- 容错回退机制 ---
+        articles_processed_for_this_magazine = False
+        for epub_path in sorted_epub_paths:
+            logger.info(f"  尝试处理文件: {epub_path.name}")
+            articles = process_epub_file(epub_path)
             
+            if articles:
+                logger.info(f"  [成功] 在文件 {epub_path.name} 中找到 {len(articles)} 篇有效文章。")
+                
+                for i, article_content in enumerate(articles):
+                    corpus = articles[:]
+                    title = generate_title_from_content(article_content, corpus)
+                    author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+){1,3})', article_content[:600])
+                    author = author_match.group(1).strip() if author_match else "Source"
+                    stem = f"{magazine_name.replace(' ', '_')}_{epub_path.stem.replace(' ', '_')}"
+                    output_path = ARTICLES_DIR / MAGAZINES[magazine_name]['topic'] / f"{stem}_art{i+1}.md"
+                    save_article(output_path, article_content, title, author)
+                    total_articles_extracted += 1
+                    logger.info(f"    -> 已保存: {output_path.name}")
+                
+                articles_processed_for_this_magazine = True
+                break # 成功处理了一个文件，就跳出循环
+            else:
+                logger.warning(f"  [跳过] 文件 {epub_path.name} 未提取到有效文章，尝试下一个...")
+
+        if not articles_processed_for_this_magazine:
+            logger.error(f"  [错误] 遍历完所有文件后，仍未能为《{magazine_name}》提取任何文章。")
+                
     logger.info(f"\n--- 文章提取流程结束。共提取了 {total_articles_extracted} 篇新文章。 ---")
 
 
 def generate_website():
-    logger.info("--- 开始生成网站 (视觉最终版) ---")
+    logger.info("--- 开始生成网站 (毛笔字体版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     
-    ### [视觉最终版] 秀丽字体 + 极致透明 ###
+    ### [毛笔字体版] 霸气书法字体 + 极致透明 ###
     shared_style_and_script = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Source+Serif+Pro:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Source+Serif+Pro:wght@400;700&display=swap');
     body { background-color: #010409; color: #e6edf3; margin: 0; }
     #dynamic-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
 </style>
@@ -170,9 +179,10 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
 <title>外刊阅读</title>""" + shared_style_and_script + """
 <style>
     .container { max-width: 1400px; margin: 0 auto; padding: 5rem 2rem; position: relative; z-index: 1; }
-    h1, .card-title { font-family: 'Playfair Display', serif; }
-    .card-meta, .card-footer, .read-link, .no-articles { font-family: 'Source Serif Pro', serif; }
-    h1 { font-size: clamp(3rem, 7vw, 5rem); text-align: center; margin-bottom: 6rem; color: #fff; font-weight: 700; text-shadow: 0 0 30px rgba(0, 191, 255, 0.4); }
+    h1, .card-title { font-family: 'ZCOOL KuaiLe', cursive; }
+    .card-meta, .card-footer, .read-link, .no-articles p { font-family: 'Source Serif Pro', serif; }
+    .no-articles h2 { font-family: 'ZCOOL KuaiLe', cursive; }
+    h1 { font-size: clamp(3.5rem, 8vw, 6rem); text-align: center; margin-bottom: 6rem; color: #fff; font-weight: 400; text-shadow: 0 0 30px rgba(0, 191, 255, 0.5); }
     .grid { display: grid; gap: 3rem; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); }
     .card {
         background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(50px); -webkit-backdrop-filter: blur(50px);
@@ -184,7 +194,7 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
         transform: translateY(-15px); background: rgba(255, 255, 255, 0.05);
         box-shadow: 0 20px 50px rgba(0, 127, 255, 0.2); border-color: rgba(255, 255, 255, 0.2);
     }
-    .card-title { font-size: 1.5rem; font-weight: 700; line-height: 1.3; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
+    .card-title { font-size: 1.8rem; font-weight: 400; line-height: 1.3; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
     .card-meta { color: #b0c4de; font-size: 0.9rem; }
     .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
     .read-link { color:#87ceeb; text-decoration:none; font-weight: 700; font-size: 0.9rem; }
@@ -202,16 +212,15 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
         border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1);
         position: relative; z-index: 1; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
     }
-    .back-link, .article-meta, h1 { font-family: 'Playfair Display', serif; }
+    .back-link, .article-meta, h1 { font-family: 'ZCOOL KuaiLe', cursive; }
     .article-body { font-family: 'Source Serif Pro', serif; }
-    .back-link { display: inline-block; margin-bottom: 3rem; text-decoration: none; color: #b0c4de; transition: color 0.3s; } .back-link:hover { color: #87ceeb; }
-    h1 { font-size: clamp(2.2rem, 6vw, 3.5rem); line-height: 1.2; color: #fff; margin:0; font-weight: 700; }
+    .back-link { display: inline-block; margin-bottom: 3rem; text-decoration: none; color: #b0c4de; transition: color 0.3s; font-size: 1.2rem; } .back-link:hover { color: #87ceeb; }
+    h1 { font-size: clamp(2.5rem, 7vw, 4rem); line-height: 1.2; color: #fff; margin:0; font-weight: 400; }
     .article-meta { color: #b0c4de; margin: 2rem 0 3rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 2rem; font-size: 1rem; }
     .article-body { font-size: 1.15rem; line-height: 2; color: #d1d9e0; }
     .article-body p { margin: 0 0 1.75em 0; }
 </style></head><body><div class="article-container"><a href="index.html" class="back-link">← 返回列表</a><h1>{{ title }}</h1><p class="article-meta">By {{ author }} · From {{ magazine }} · {{ reading_time }}</p><div class="article-body">{{ content }}</div></div></body></html>"""
 
-    # ... (模板渲染逻辑保持不变)
     articles_data = []
     md_files = glob.glob(str(ARTICLES_DIR / '**/*.md'), recursive=True)
     logger.info(f"找到 {len(md_files)} 个 Markdown 文件用于生成网页。")
