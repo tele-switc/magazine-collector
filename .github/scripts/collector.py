@@ -60,7 +60,7 @@ def process_epub_file(epub_path):
             if len(text_content.split()) > 150 and not any(kw in text_content[:500].lower() for kw in NON_ARTICLE_KEYWORDS) and text_content.count('\n\n') > 3:
                 articles.append(text_content)
     except Exception as e:
-        logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=True)
+        logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=False)
     return articles
 
 def generate_title_from_content(text, corpus):
@@ -85,9 +85,16 @@ def save_article(output_path, text_content, title, author):
     frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
     output_path.write_text(frontmatter + text_content, encoding="utf-8")
 
-### [胜利最终版] 引入智能过滤和排序，并保留容错回退机制 ###
+### [终极修复] 引入智能日期解析器进行排序 ###
+def extract_date_from_path(path):
+    """从路径中用正则表达式提取 YYYY.MM.DD 格式的日期。"""
+    match = re.search(r'(\d{4}\.\d{2}\.\d{2})', path.name)
+    if match:
+        return match.group(1)
+    return "1970.01.01" # 如果找不到日期，则返回一个很早的日期，使其排在最后
+
 def process_all_magazines():
-    logger.info("--- 开始文章提取流程 (最终版 v2) ---")
+    logger.info("--- 开始文章提取流程 (终极修复版) ---")
     
     if not SOURCE_REPO_PATH.is_dir():
         logger.error(f"致命错误: 源仓库目录 '{SOURCE_REPO_PATH}' 不存在！")
@@ -114,21 +121,10 @@ def process_all_magazines():
         
         logger.info(f"\n>>> 处理杂志: {magazine_name}")
         
-        # --- 智能过滤与排序 ---
-        # 1. 优先选择文件名中包含下划线的标准格式文件
-        standard_files = [p for p in epub_paths if '_' in p.name]
-        # 2. 如果没有标准文件，才使用所有文件
-        files_to_process = standard_files if standard_files else epub_paths
+        # --- 智能日期排序 ---
+        sorted_epub_paths = sorted(epub_paths, key=extract_date_from_path, reverse=True)
         
-        # 3. 对筛选后的文件列表进行排序
-        sorted_epub_paths = sorted(files_to_process, key=lambda p: p.name, reverse=True)
-        
-        if not sorted_epub_paths:
-            logger.warning(f"  杂志 '{magazine_name}' 没有找到符合格式的文件可供处理。")
-            continue
-
         # --- 容错回退机制 ---
-        articles_processed_for_this_magazine = False
         for epub_path in sorted_epub_paths:
             logger.info(f"  尝试处理文件: {epub_path.name}")
             articles = process_epub_file(epub_path)
@@ -147,25 +143,21 @@ def process_all_magazines():
                     total_articles_extracted += 1
                     logger.info(f"    -> 已保存: {output_path.name}")
                 
-                articles_processed_for_this_magazine = True
                 break # 成功处理了一个文件，就跳出循环
             else:
                 logger.warning(f"  [跳过] 文件 {epub_path.name} 未提取到有效文章，尝试下一个...")
-
-        if not articles_processed_for_this_magazine:
-            logger.error(f"  [错误] 遍历完所有文件后，仍未能为《{magazine_name}》提取任何文章。")
                 
     logger.info(f"\n--- 文章提取流程结束。共提取了 {total_articles_extracted} 篇新文章。 ---")
 
 
 def generate_website():
-    logger.info("--- 开始生成网站 (毛笔字体版) ---")
+    logger.info("--- 开始生成网站 (帅气毛笔字版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     
-    ### [毛笔字体版] 霸气书法字体 + 极致透明 ###
+    ### [帅气毛笔字版] ZCOOL XiaoWei + Noto Serif SC ###
     shared_style_and_script = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=ZCOOL+KuaiLe&family=Source+Serif+Pro:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=Noto+Serif+SC:wght@400;700&display=swap');
     body { background-color: #010409; color: #e6edf3; margin: 0; }
     #dynamic-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
 </style>
@@ -179,26 +171,25 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
 <title>外刊阅读</title>""" + shared_style_and_script + """
 <style>
     .container { max-width: 1400px; margin: 0 auto; padding: 5rem 2rem; position: relative; z-index: 1; }
-    h1, .card-title { font-family: 'ZCOOL KuaiLe', cursive; }
-    .card-meta, .card-footer, .read-link, .no-articles p { font-family: 'Source Serif Pro', serif; }
-    .no-articles h2 { font-family: 'ZCOOL KuaiLe', cursive; }
+    h1, h2, .card-title { font-family: 'ZCOOL XiaoWei', sans-serif; }
+    body, p, .card-meta, .read-link { font-family: 'Noto Serif SC', serif; }
     h1 { font-size: clamp(3.5rem, 8vw, 6rem); text-align: center; margin-bottom: 6rem; color: #fff; font-weight: 400; text-shadow: 0 0 30px rgba(0, 191, 255, 0.5); }
     .grid { display: grid; gap: 3rem; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); }
     .card {
-        background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(50px); -webkit-backdrop-filter: blur(50px);
+        background: rgba(13, 22, 38, 0.5); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
         border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; padding: 2.5rem;
-        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1); transition: all 0.4s ease;
+        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2); transition: all 0.4s ease;
         display: flex; flex-direction: column;
     }
     .card:hover {
-        transform: translateY(-15px); background: rgba(255, 255, 255, 0.05);
+        transform: translateY(-15px); background: rgba(20, 35, 58, 0.6);
         box-shadow: 0 20px 50px rgba(0, 127, 255, 0.2); border-color: rgba(255, 255, 255, 0.2);
     }
-    .card-title { font-size: 1.8rem; font-weight: 400; line-height: 1.3; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
+    .card-title { font-size: 1.6rem; font-weight: 400; line-height: 1.4; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
     .card-meta { color: #b0c4de; font-size: 0.9rem; }
     .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
     .read-link { color:#87ceeb; text-decoration:none; font-weight: 700; font-size: 0.9rem; }
-    .no-articles { background: rgba(255, 255, 255, 0.02); backdrop-filter: blur(50px); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1); text-align:center; padding:5rem 2rem; color: #b0c4de;}
+    .no-articles { background: rgba(13, 22, 38, 0.5); backdrop-filter: blur(40px); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1); text-align:center; padding:5rem 2rem; color: #b0c4de;}
 </style></head><body><div class="container"><h1>外刊阅读</h1><div class="grid">
 {% for article in articles %}<div class="card"><h3 class="card-title">{{ article.title }}</h3><p class="card-meta">{{ article.magazine }} · {{ article.reading_time }}</p><div class="card-footer"><span class="card-meta">By {{ article.author }}</span><a href="{{ article.url }}" class="read-link">阅读 →</a></div></div>{% endfor %}
 </div>{% if not articles %}<div class="no-articles"><h2>未发现文章</h2><p>引擎已运行，但本次未处理新的文章。</p></div>{% endif %}</div></body></html>"""
@@ -207,17 +198,17 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }} | 外刊阅读</title>""" + shared_style_and_script + """
 <style>
     .article-container {
-        max-width: 720px; margin: 6rem auto; padding: clamp(3rem, 6vw, 5rem);
-        background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(50px); -webkit-backdrop-filter: blur(50px);
+        max-width: 760px; margin: 6rem auto; padding: clamp(3rem, 6vw, 5rem);
+        background: rgba(13, 22, 38, 0.6); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
         border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1);
-        position: relative; z-index: 1; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+        position: relative; z-index: 1; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
     }
-    .back-link, .article-meta, h1 { font-family: 'ZCOOL KuaiLe', cursive; }
-    .article-body { font-family: 'Source Serif Pro', serif; }
+    .back-link, h1 { font-family: 'ZCOOL XiaoWei', sans-serif; }
+    .article-meta, .article-body { font-family: 'Noto Serif SC', serif; }
     .back-link { display: inline-block; margin-bottom: 3rem; text-decoration: none; color: #b0c4de; transition: color 0.3s; font-size: 1.2rem; } .back-link:hover { color: #87ceeb; }
-    h1 { font-size: clamp(2.5rem, 7vw, 4rem); line-height: 1.2; color: #fff; margin:0; font-weight: 400; }
+    h1 { font-size: clamp(2.5rem, 7vw, 3.8rem); line-height: 1.3; color: #fff; margin:0; font-weight: 400; }
     .article-meta { color: #b0c4de; margin: 2rem 0 3rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 2rem; font-size: 1rem; }
-    .article-body { font-size: 1.15rem; line-height: 2; color: #d1d9e0; }
+    .article-body { font-size: 1.1rem; line-height: 2.1; color: #dce3ec; }
     .article-body p { margin: 0 0 1.75em 0; }
 </style></head><body><div class="article-container"><a href="index.html" class="back-link">← 返回列表</a><h1>{{ title }}</h1><p class="article-meta">By {{ author }} · From {{ magazine }} · {{ reading_time }}</p><div class="article-body">{{ content }}</div></div></body></html>"""
 
