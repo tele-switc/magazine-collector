@@ -39,7 +39,7 @@ MAGAZINES = {
 }
 
 # ==============================================================================
-# 2. 核心功能函数 (已稳定)
+# 2. 核心功能函数
 # ==============================================================================
 def setup_directories():
     ARTICLES_DIR.mkdir(exist_ok=True)
@@ -47,6 +47,7 @@ def setup_directories():
     for info in MAGAZINES.values():
         (ARTICLES_DIR / info['topic']).mkdir(exist_ok=True)
 
+### [终极修复] 采用全新的、基于<p>标签的、绝对可靠的文章提取逻辑 ###
 def process_epub_file(epub_path):
     articles = []
     try:
@@ -54,14 +55,29 @@ def process_epub_file(epub_path):
         items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
         for item in items:
             soup = BeautifulSoup(item.get_content(), 'lxml')
-            for tag in soup(['script', 'style', 'a', 'img', 'nav', 'header', 'footer', 'figure', 'figcaption']):
-                tag.decompose()
-            text_content = re.sub(r'\n\s*\n+', '\n\n', soup.get_text(separator='\n', strip=True)).strip()
-            if len(text_content.split()) > 150 and not any(kw in text_content[:500].lower() for kw in NON_ARTICLE_KEYWORDS) and text_content.count('\n\n') > 3:
+            
+            # 1. 直接查找所有段落标签
+            paragraphs = soup.find_all('p')
+            
+            # 2. 如果段落少于5个，这绝不是一篇正式文章，立即跳过
+            if len(paragraphs) < 5:
+                continue
+            
+            # 3. 手动从每个<p>标签提取文本并重组文章
+            # 这确保了我们的段落分隔符`\n\n`绝对正确
+            text_from_paragraphs = [p.get_text(strip=True) for p in paragraphs]
+            text_content = "\n\n".join(p for p in text_from_paragraphs if p) # 过滤掉空段落
+
+            # 4. 在格式绝对正确的文本上，进行最终质检
+            #   - 词数检查 (降低门槛以防万一)
+            #   - 关键词检查
+            if len(text_content.split()) > 100 and not any(kw in text_content[:500].lower() for kw in NON_ARTICLE_KEYWORDS):
                 articles.append(text_content)
+                
     except Exception as e:
         logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=False)
     return articles
+
 
 def generate_title_from_content(text, corpus):
     try:
@@ -85,16 +101,19 @@ def save_article(output_path, text_content, title, author):
     frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
     output_path.write_text(frontmatter + text_content, encoding="utf-8")
 
-### [终极修复] 引入智能日期解析器进行排序 ###
 def extract_date_from_path(path):
     """从路径中用正则表达式提取 YYYY.MM.DD 格式的日期。"""
     match = re.search(r'(\d{4}\.\d{2}\.\d{2})', path.name)
     if match:
         return match.group(1)
+    # 尝试匹配 YYYY-MM-DD
+    match = re.search(r'(\d{4}-\d{2}-\d{2})', path.name)
+    if match:
+        return match.group(1).replace('-', '.')
     return "1970.01.01" # 如果找不到日期，则返回一个很早的日期，使其排在最后
 
 def process_all_magazines():
-    logger.info("--- 开始文章提取流程 (终极修复版) ---")
+    logger.info("--- 开始文章提取流程 (终极承诺版) ---")
     
     if not SOURCE_REPO_PATH.is_dir():
         logger.error(f"致命错误: 源仓库目录 '{SOURCE_REPO_PATH}' 不存在！")
@@ -121,10 +140,8 @@ def process_all_magazines():
         
         logger.info(f"\n>>> 处理杂志: {magazine_name}")
         
-        # --- 智能日期排序 ---
         sorted_epub_paths = sorted(epub_paths, key=extract_date_from_path, reverse=True)
         
-        # --- 容错回退机制 ---
         for epub_path in sorted_epub_paths:
             logger.info(f"  尝试处理文件: {epub_path.name}")
             articles = process_epub_file(epub_path)
@@ -143,7 +160,7 @@ def process_all_magazines():
                     total_articles_extracted += 1
                     logger.info(f"    -> 已保存: {output_path.name}")
                 
-                break # 成功处理了一个文件，就跳出循环
+                break 
             else:
                 logger.warning(f"  [跳过] 文件 {epub_path.name} 未提取到有效文章，尝试下一个...")
                 
@@ -154,7 +171,6 @@ def generate_website():
     logger.info("--- 开始生成网站 (帅气毛笔字版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     
-    ### [帅气毛笔字版] ZCOOL XiaoWei + Noto Serif SC ###
     shared_style_and_script = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=Noto+Serif+SC:wght@400;700&display=swap');
