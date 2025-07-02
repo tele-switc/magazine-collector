@@ -1,5 +1,5 @@
 import os
-importre
+import re
 from pathlib import Path
 import ebooklib
 from ebooklib import epub
@@ -47,7 +47,6 @@ def setup_directories():
     for info in MAGAZINES.values():
         (ARTICLES_DIR / info['topic']).mkdir(exist_ok=True)
 
-### [终极修复] 采用全新的、基于<p>标签的、绝对可靠的文章提取逻辑 ###
 def process_epub_file(epub_path):
     articles = []
     try:
@@ -55,65 +54,63 @@ def process_epub_file(epub_path):
         items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
         for item in items:
             soup = BeautifulSoup(item.get_content(), 'lxml')
-            
-            # 1. 直接查找所有段落标签
             paragraphs = soup.find_all('p')
-            
-            # 2. 如果段落少于5个，这绝不是一篇正式文章，立即跳过
-            if len(paragraphs) < 5:
-                continue
-            
-            # 3. 手动从每个<p>标签提取文本并重组文章
-            # 这确保了我们的段落分隔符`\n\n`绝对正确
+            if len(paragraphs) < 5: continue
             text_from_paragraphs = [p.get_text(strip=True) for p in paragraphs]
-            text_content = "\n\n".join(p for p in text_from_paragraphs if p) # 过滤掉空段落
-
-            # 4. 在格式绝对正确的文本上，进行最终质检
-            #   - 词数检查 (降低门槛以防万一)
-            #   - 关键词检查
+            text_content = "\n\n".join(p for p in text_from_paragraphs if p)
             if len(text_content.split()) > 100 and not any(kw in text_content[:500].lower() for kw in NON_ARTICLE_KEYWORDS):
                 articles.append(text_content)
-                
     except Exception as e:
         logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=False)
     return articles
 
-
-def generate_title_from_content(text, corpus):
+### [精加工] 标题生成引擎升级：独立分析 ###
+def generate_title_from_content(text):
+    """
+    为单篇文章生成标题，语料库仅包含自身，避免重复。
+    """
     try:
+        # 使用文章自身作为语料库
+        corpus = [text]
         stop_words = list(stopwords.words('english')) + ['would', 'could', 'said', 'also', 'like', 'one', 'two', 'mr', 'ms']
-        vectorizer = TfidfVectorizer(max_features=20, stop_words=stop_words, ngram_range=(1, 3), token_pattern=r'(?u)\b[a-zA-Z-]{4,}\b')
+        vectorizer = TfidfVectorizer(max_features=10, stop_words=stop_words, ngram_range=(1, 3), token_pattern=r'(?u)\b[a-zA-Z-]{4,}\b')
         vectorizer.fit(corpus)
-        response = vectorizer.transform([text])
         feature_names = vectorizer.get_feature_names_out()
-        if not feature_names.any(): return nltk.sent_tokenize(text)[0].strip()
-        scores = response.toarray().flatten()
-        top_keywords = [feature_names[i] for i in scores.argsort()[-8:][::-1] if feature_names[i].strip()]
-        if len(top_keywords) < 3: return nltk.sent_tokenize(text)[0].strip()
-        return ' '.join(word.capitalize() for word in top_keywords[:5])
-    except:
+        
+        if not feature_names.any(): 
+            return nltk.sent_tokenize(text)[0].strip()
+
+        # 过滤掉非名词和形容词的关键词
+        good_keywords = []
+        for keyword in feature_names:
+            pos_tags = nltk.pos_tag(nltk.word_tokenize(keyword))
+            if any(tag.startswith('NN') or tag.startswith('JJ') for _, tag in pos_tags):
+                good_keywords.append(keyword)
+
+        if len(good_keywords) < 2: 
+            return nltk.sent_tokenize(text)[0].strip()
+            
+        return ' '.join(word.capitalize() for word in good_keywords[:5])
+    except Exception as e:
+        logger.warning(f"  标题生成失败，使用备用方案: {e}")
         return nltk.sent_tokenize(text)[0].strip() if text else "Untitled Article"
 
-def save_article(output_path, text_content, title, author):
+def save_article(output_path, text_content, title, author, magazine):
     word_count = len(text_content.split())
     reading_time = f"~{max(1, round(word_count / 230))} min read"
     safe_title = title.replace('"', "'")
-    frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
+    # 将杂志名称也存入frontmatter
+    frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nmagazine: "{magazine}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
     output_path.write_text(frontmatter + text_content, encoding="utf-8")
 
 def extract_date_from_path(path):
-    """从路径中用正则表达式提取 YYYY.MM.DD 格式的日期。"""
-    match = re.search(r'(\d{4}\.\d{2}\.\d{2})', path.name)
-    if match:
-        return match.group(1)
-    # 尝试匹配 YYYY-MM-DD
-    match = re.search(r'(\d{4}-\d{2}-\d{2})', path.name)
+    match = re.search(r'(\d{4}[-.]\d{2}[-.]\d{2})', path.name)
     if match:
         return match.group(1).replace('-', '.')
-    return "1970.01.01" # 如果找不到日期，则返回一个很早的日期，使其排在最后
+    return "1970.01.01"
 
 def process_all_magazines():
-    logger.info("--- 开始文章提取流程 (终极承诺版) ---")
+    logger.info("--- 开始文章提取流程 (精加工版) ---")
     
     if not SOURCE_REPO_PATH.is_dir():
         logger.error(f"致命错误: 源仓库目录 '{SOURCE_REPO_PATH}' 不存在！")
@@ -134,12 +131,9 @@ def process_all_magazines():
     
     total_articles_extracted = 0
     for magazine_name, epub_paths in magazine_epubs.items():
-        if not epub_paths:
-            logger.info(f"杂志 '{magazine_name}' 没有找到可处理的EPUB文件，跳过。")
-            continue
+        if not epub_paths: continue
         
         logger.info(f"\n>>> 处理杂志: {magazine_name}")
-        
         sorted_epub_paths = sorted(epub_paths, key=extract_date_from_path, reverse=True)
         
         for epub_path in sorted_epub_paths:
@@ -150,15 +144,21 @@ def process_all_magazines():
                 logger.info(f"  [成功] 在文件 {epub_path.name} 中找到 {len(articles)} 篇有效文章。")
                 
                 for i, article_content in enumerate(articles):
-                    corpus = articles[:]
-                    title = generate_title_from_content(article_content, corpus)
-                    author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+){1,3})', article_content[:600])
-                    author = author_match.group(1).strip() if author_match else "Source"
+                    # --- 修复：为每篇文章独立生成标题 ---
+                    title = generate_title_from_content(article_content)
+                    
+                    # --- 修复：更精确地提取作者 ---
+                    author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+){1,3})', article_content[:800]) # 扩大搜索范围
+                    author = author_match.group(1).strip() if author_match else "N/A" # 默认为 N/A
+                    
                     stem = f"{magazine_name.replace(' ', '_')}_{epub_path.stem.replace(' ', '_')}"
                     output_path = ARTICLES_DIR / MAGAZINES[magazine_name]['topic'] / f"{stem}_art{i+1}.md"
-                    save_article(output_path, article_content, title, author)
+                    
+                    # --- 修复：将杂志名称传入，以便保存 ---
+                    save_article(output_path, article_content, title, author, magazine_name)
+                    
                     total_articles_extracted += 1
-                    logger.info(f"    -> 已保存: {output_path.name}")
+                    logger.info(f"    -> 已保存: {output_path.name} (作者: {author})")
                 
                 break 
             else:
@@ -168,12 +168,13 @@ def process_all_magazines():
 
 
 def generate_website():
-    logger.info("--- 开始生成网站 (帅气毛笔字版) ---")
+    logger.info("--- 开始生成网站 (秀丽字体版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     
+    ### [秀丽字体版] EB Garamond + Noto Serif SC ###
     shared_style_and_script = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=Noto+Serif+SC:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;700&family=Noto+Serif+SC:wght@400;700&display=swap');
     body { background-color: #010409; color: #e6edf3; margin: 0; }
     #dynamic-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
 </style>
@@ -186,10 +187,9 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>外刊阅读</title>""" + shared_style_and_script + """
 <style>
+    body, h1, h2, h3, p, span, a, div { font-family: 'EB Garamond', 'Noto Serif SC', serif; }
     .container { max-width: 1400px; margin: 0 auto; padding: 5rem 2rem; position: relative; z-index: 1; }
-    h1, h2, .card-title { font-family: 'ZCOOL XiaoWei', sans-serif; }
-    body, p, .card-meta, .read-link { font-family: 'Noto Serif SC', serif; }
-    h1 { font-size: clamp(3.5rem, 8vw, 6rem); text-align: center; margin-bottom: 6rem; color: #fff; font-weight: 400; text-shadow: 0 0 30px rgba(0, 191, 255, 0.5); }
+    h1 { font-size: clamp(3rem, 7vw, 5rem); text-align: center; margin-bottom: 6rem; color: #fff; font-weight: 700; text-shadow: 0 0 30px rgba(0, 191, 255, 0.4); }
     .grid { display: grid; gap: 3rem; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); }
     .card {
         background: rgba(13, 22, 38, 0.5); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
@@ -201,11 +201,12 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
         transform: translateY(-15px); background: rgba(20, 35, 58, 0.6);
         box-shadow: 0 20px 50px rgba(0, 127, 255, 0.2); border-color: rgba(255, 255, 255, 0.2);
     }
-    .card-title { font-size: 1.6rem; font-weight: 400; line-height: 1.4; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
+    .card-title { font-size: 1.5rem; font-weight: 700; line-height: 1.4; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
     .card-meta { color: #b0c4de; font-size: 0.9rem; }
     .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
     .read-link { color:#87ceeb; text-decoration:none; font-weight: 700; font-size: 0.9rem; }
     .no-articles { background: rgba(13, 22, 38, 0.5); backdrop-filter: blur(40px); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1); text-align:center; padding:5rem 2rem; color: #b0c4de;}
+    .no-articles h2 { font-weight: 700; }
 </style></head><body><div class="container"><h1>外刊阅读</h1><div class="grid">
 {% for article in articles %}<div class="card"><h3 class="card-title">{{ article.title }}</h3><p class="card-meta">{{ article.magazine }} · {{ article.reading_time }}</p><div class="card-footer"><span class="card-meta">By {{ article.author }}</span><a href="{{ article.url }}" class="read-link">阅读 →</a></div></div>{% endfor %}
 </div>{% if not articles %}<div class="no-articles"><h2>未发现文章</h2><p>引擎已运行，但本次未处理新的文章。</p></div>{% endif %}</div></body></html>"""
@@ -213,18 +214,17 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
     article_html_template = """
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }} | 外刊阅读</title>""" + shared_style_and_script + """
 <style>
+    body, h1, h2, h3, p, span, a, div { font-family: 'EB Garamond', 'Noto Serif SC', serif; }
     .article-container {
         max-width: 760px; margin: 6rem auto; padding: clamp(3rem, 6vw, 5rem);
         background: rgba(13, 22, 38, 0.6); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
         border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1);
         position: relative; z-index: 1; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
     }
-    .back-link, h1 { font-family: 'ZCOOL XiaoWei', sans-serif; }
-    .article-meta, .article-body { font-family: 'Noto Serif SC', serif; }
-    .back-link { display: inline-block; margin-bottom: 3rem; text-decoration: none; color: #b0c4de; transition: color 0.3s; font-size: 1.2rem; } .back-link:hover { color: #87ceeb; }
-    h1 { font-size: clamp(2.5rem, 7vw, 3.8rem); line-height: 1.3; color: #fff; margin:0; font-weight: 400; }
+    .back-link { display: inline-block; margin-bottom: 3rem; text-decoration: none; color: #b0c4de; transition: color 0.3s; font-size: 1.1rem; } .back-link:hover { color: #87ceeb; }
+    h1 { font-size: clamp(2.2rem, 6vw, 3.2rem); line-height: 1.3; color: #fff; margin:0; font-weight: 700; }
     .article-meta { color: #b0c4de; margin: 2rem 0 3rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 2rem; font-size: 1rem; }
-    .article-body { font-size: 1.1rem; line-height: 2.1; color: #dce3ec; }
+    .article-body { font-size: 1.15rem; line-height: 2.1; color: #dce3ec; }
     .article-body p { margin: 0 0 1.75em 0; }
 </style></head><body><div class="article-container"><a href="index.html" class="back-link">← 返回列表</a><h1>{{ title }}</h1><p class="article-meta">By {{ author }} · From {{ magazine }} · {{ reading_time }}</p><div class="article-body">{{ content }}</div></div></body></html>"""
 
@@ -239,10 +239,15 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
             if not match: continue
             frontmatter, content = match.groups()
             def get_meta(key, text):
-                m = re.search(fr'{key}:\s*"?(.+?)"?\s*\n', text)
-                return m.group(1).strip() if m else "Unknown"
-            title, author, reading_time = get_meta('title', frontmatter), get_meta('author', frontmatter), get_meta('reading_time', frontmatter)
-            magazine = md_file.name.split('_')[0].replace('-', ' ').title()
+                m = re.search(fr'^{key}:\s*"?(.+?)"?\s*$', text, re.MULTILINE)
+                return m.group(1).strip() if m else "N/A"
+            
+            # --- 修复：从 frontmatter 中读取所有元数据 ---
+            title = get_meta('title', frontmatter)
+            author = get_meta('author', frontmatter)
+            magazine = get_meta('magazine', frontmatter)
+            reading_time = get_meta('reading_time', frontmatter)
+
             article_filename, article_path = f"{md_file.stem}.html", WEBSITE_DIR / f"{md_file.stem}.html"
             article_html = jinja2.Template(article_html_template).render(title=title, content=markdown2.markdown(content), author=author, magazine=magazine, reading_time=reading_time)
             article_path.write_text(article_html, encoding='utf-8')
