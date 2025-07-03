@@ -8,8 +8,6 @@ import logging
 import markdown2
 import jinja2
 import nltk
-from sklearn.feature_extraction.text import TfidfVectorizer
-from nltk.corpus import stopwords
 import glob
 
 # ==============================================================================
@@ -22,13 +20,11 @@ def setup_nltk():
     nltk_data_path = Path.cwd() / "nltk_data"
     nltk_data_path.mkdir(exist_ok=True)
     nltk.data.path.append(str(nltk_data_path))
-    required_packages = ['punkt', 'stopwords', 'averaged_perceptron_tagger']
+    required_packages = ['punkt']
     for package_id in required_packages:
         try:
-            nltk.data.find(f'tokenizers/{package_id}' if package_id == 'punkt' else f'corpora/{package_id}' if package_id == 'stopwords' else f'taggers/{package_id}')
-            logger.info(f"[NLTK] '{package_id}' 已存在。")
+            nltk.data.find(f'tokenizers/{package_id}')
         except LookupError:
-            logger.info(f"[NLTK] '{package_id}' 未找到，开始下载...")
             nltk.download(package_id, download_dir=str(nltk_data_path))
 setup_nltk()
 
@@ -55,76 +51,69 @@ MAGAZINES = {
 def setup_directories():
     ARTICLES_DIR.mkdir(exist_ok=True)
     WEBSITE_DIR.mkdir(exist_ok=True)
-    # 不再需要按主题分类，所有文章都放在一个目录
     (ARTICLES_DIR / "processed").mkdir(exist_ok=True)
 
+### [最终优化] 提取原始标题 ###
 def process_epub_file(epub_path):
-    articles = []
+    """
+    从EPUB中提取文章，每篇文章包含其原始标题和正文。
+    返回一个字典列表: [{'title': '...', 'author': '...', 'content': '...'}]
+    """
+    articles_data = []
     try:
         book = epub.read_epub(str(epub_path))
         items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
         for item in items:
             soup = BeautifulSoup(item.get_content(), 'lxml')
+            
+            # 1. 提取原始标题 (按 h1, h2, h3 优先级)
+            title_tag = soup.find('h1') or soup.find('h2') or soup.find('h3')
+            title = title_tag.get_text(strip=True) if title_tag else None
+            
+            # 如果没有标题，或者标题是“非文章”关键词，则跳过
+            if not title or any(kw in title.lower() for kw in NON_ARTICLE_KEYWORDS):
+                continue
+
+            # 2. 提取段落作为正文
             paragraphs = soup.find_all('p')
-            if len(paragraphs) < 8: continue
+            if len(paragraphs) < 5: continue
+            
             text_from_paragraphs = [p.get_text(strip=True) for p in paragraphs]
-            text_content = "\n\n".join(p for p in text_from_paragraphs if p)
-            if 400 < len(text_content.split()) < 5000:
-                if not any(kw in text_content[:500].lower() for kw in NON_ARTICLE_KEYWORDS):
-                    articles.append(text_content)
+            content = "\n\n".join(p for p in text_from_paragraphs if p)
+
+            if not (200 < len(content.split()) < 5000):
+                 continue
+            
+            # 3. 提取作者
+            # 从正文开头搜索，因为作者信息通常在标题之后
+            author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+){1,3})', content[:500])
+            author = author_match.group(1).strip() if author_match else "N/A"
+            
+            articles_data.append({
+                "title": title,
+                "author": author,
+                "content": content
+            })
+
     except Exception as e:
         logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=False)
-    return articles
-
-### [终极稳定版] 回归并强化TF-IDF标题生成 ###
-def generate_title_from_content(text):
-    try:
-        # 使用文章自身作为语料库，确保标题独一无二
-        corpus = [text]
-        stop_words = list(stopwords.words('english'))
-        stop_words.extend(['would', 'could', 'said', 'also', 'like', 'one', 'two', 'mr', 'ms', 'year'])
-        
-        # 提取 N-grams (词组) 作为候选标题
-        vectorizer = TfidfVectorizer(max_features=15, stop_words=stop_words, ngram_range=(2, 4)).fit(corpus)
-        candidates = vectorizer.get_feature_names_out()
-        
-        if not candidates.any():
-            return nltk.sent_tokenize(text)[0].strip()
-
-        # 对候选标题进行打分 (选择包含名词且不太长的)
-        best_candidate = ""
-        highest_score = 0
-        
-        for cand in candidates:
-            score = 0
-            # 奖励包含名词的
-            if any(tag.startswith('NN') for word, tag in nltk.pos_tag(nltk.word_tokenize(cand))):
-                score += 10
-            # 惩罚过长或过短的
-            if not (15 < len(cand) < 80):
-                score -= 5
-            
-            if score > highest_score:
-                highest_score = score
-                best_candidate = cand
-        
-        if best_candidate:
-            return best_candidate.capitalize()
-        else:
-            # 终极备用方案
-            return nltk.sent_tokenize(text)[0].strip()
-
-    except Exception as e:
-        logger.warning(f"  标题生成失败，使用备用方案: {e}")
-        return text.split('.')[0].strip()[:100]
+    return articles_data
 
 
-def save_article(output_path, text_content, title, author, magazine):
-    word_count = len(text_content.split())
+def save_article(output_path, article_data, magazine):
+    word_count = len(article_data['content'].split())
     reading_time = f"~{max(1, round(word_count / 230))} min read"
-    safe_title = title.replace('"', "'")
-    frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nmagazine: "{magazine}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
-    output_path.write_text(frontmatter + text_content, encoding="utf-8")
+    safe_title = article_data['title'].replace('"', "'")
+    frontmatter = (
+        f'---\n'
+        f'title: "{safe_title}"\n'
+        f'author: "{article_data["author"]}"\n'
+        f'magazine: "{magazine}"\n'
+        f'words: {word_count}\n'
+        f'reading_time: "{reading_time}"\n'
+        f'---\n\n'
+    )
+    output_path.write_text(frontmatter + article_data['content'], encoding="utf-8")
 
 def extract_date_from_path(path):
     match = re.search(r'(\d{4}[-.]\d{2}[-.]\d{2})', path.name)
@@ -132,10 +121,11 @@ def extract_date_from_path(path):
     return "1970.01.01"
 
 def process_all_magazines():
-    logger.info("--- 开始文章提取流程 (终极稳定版) ---")
+    logger.info("--- 开始文章提取流程 (最终完美版) ---")
     if not SOURCE_REPO_PATH.is_dir():
         logger.error(f"致命错误: 源仓库目录 '{SOURCE_REPO_PATH}' 不存在！")
         return
+        
     found_epubs = [Path(root) / file for root, _, files in os.walk(SOURCE_REPO_PATH) for file in files if file.endswith('.epub')]
     if not found_epubs:
         logger.warning("在源仓库中未找到任何 .epub 文件。")
@@ -156,26 +146,25 @@ def process_all_magazines():
         sorted_epub_paths = sorted(epub_paths, key=extract_date_from_path, reverse=True)
         for epub_path in sorted_epub_paths:
             logger.info(f"  尝试处理文件: {epub_path.name}")
-            articles = process_epub_file(epub_path)
-            if articles:
-                logger.info(f"  [成功] 在文件 {epub_path.name} 中找到 {len(articles)} 篇有效文章。")
-                for i, article_content in enumerate(articles):
-                    title = generate_title_from_content(article_content)
-                    author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+){1,3})', article_content[:800])
-                    author = author_match.group(1).strip() if author_match else "N/A"
+            articles_data = process_epub_file(epub_path)
+            
+            if articles_data:
+                logger.info(f"  [成功] 在文件 {epub_path.name} 中找到 {len(articles_data)} 篇有效文章。")
+                for i, article in enumerate(articles_data):
                     stem = f"{magazine_name.replace(' ', '_')}_{epub_path.stem.replace(' ', '_')}"
                     output_path = ARTICLES_DIR / "processed" / f"{stem}_art{i+1}.md"
-                    save_article(output_path, article_content, title, author, magazine_name)
+                    save_article(output_path, article, magazine_name)
                     total_articles_extracted += 1
-                    logger.info(f"    -> 已保存: {output_path.name} (作者: {author})")
+                    logger.info(f"    -> 已保存: {article['title']} (作者: {article['author']})")
                 break 
             else:
                 logger.warning(f"  [跳过] 文件 {epub_path.name} 未提取到有效文章，尝试下一个...")
+                
     logger.info(f"\n--- 文章提取流程结束。共提取了 {total_articles_extracted} 篇新文章。 ---")
 
 
 def generate_website():
-    logger.info("--- 开始生成网站 (终极稳定版) ---")
+    logger.info("--- 开始生成网站 (最终完美版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     shared_style_and_script = """
 <style>
