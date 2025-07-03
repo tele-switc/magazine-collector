@@ -64,32 +64,23 @@ def process_epub_file(epub_path):
         logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=False)
     return articles
 
-### [精加工] 标题生成引擎升级：独立分析 ###
 def generate_title_from_content(text):
-    """
-    为单篇文章生成标题，语料库仅包含自身，避免重复。
-    """
     try:
-        # 使用文章自身作为语料库
         corpus = [text]
         stop_words = list(stopwords.words('english')) + ['would', 'could', 'said', 'also', 'like', 'one', 'two', 'mr', 'ms']
         vectorizer = TfidfVectorizer(max_features=10, stop_words=stop_words, ngram_range=(1, 3), token_pattern=r'(?u)\b[a-zA-Z-]{4,}\b')
         vectorizer.fit(corpus)
         feature_names = vectorizer.get_feature_names_out()
         
-        if not feature_names.any(): 
-            return nltk.sent_tokenize(text)[0].strip()
+        if not feature_names.any(): return nltk.sent_tokenize(text)[0].strip()
 
-        # 过滤掉非名词和形容词的关键词
         good_keywords = []
         for keyword in feature_names:
             pos_tags = nltk.pos_tag(nltk.word_tokenize(keyword))
             if any(tag.startswith('NN') or tag.startswith('JJ') for _, tag in pos_tags):
                 good_keywords.append(keyword)
 
-        if len(good_keywords) < 2: 
-            return nltk.sent_tokenize(text)[0].strip()
-            
+        if len(good_keywords) < 2: return nltk.sent_tokenize(text)[0].strip()
         return ' '.join(word.capitalize() for word in good_keywords[:5])
     except Exception as e:
         logger.warning(f"  标题生成失败，使用备用方案: {e}")
@@ -99,7 +90,6 @@ def save_article(output_path, text_content, title, author, magazine):
     word_count = len(text_content.split())
     reading_time = f"~{max(1, round(word_count / 230))} min read"
     safe_title = title.replace('"', "'")
-    # 将杂志名称也存入frontmatter
     frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nmagazine: "{magazine}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
     output_path.write_text(frontmatter + text_content, encoding="utf-8")
 
@@ -144,22 +134,14 @@ def process_all_magazines():
                 logger.info(f"  [成功] 在文件 {epub_path.name} 中找到 {len(articles)} 篇有效文章。")
                 
                 for i, article_content in enumerate(articles):
-                    # --- 修复：为每篇文章独立生成标题 ---
                     title = generate_title_from_content(article_content)
-                    
-                    # --- 修复：更精确地提取作者 ---
-                    author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+){1,3})', article_content[:800]) # 扩大搜索范围
-                    author = author_match.group(1).strip() if author_match else "N/A" # 默认为 N/A
-                    
+                    author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+){1,3})', article_content[:800])
+                    author = author_match.group(1).strip() if author_match else "N/A"
                     stem = f"{magazine_name.replace(' ', '_')}_{epub_path.stem.replace(' ', '_')}"
                     output_path = ARTICLES_DIR / MAGAZINES[magazine_name]['topic'] / f"{stem}_art{i+1}.md"
-                    
-                    # --- 修复：将杂志名称传入，以便保存 ---
                     save_article(output_path, article_content, title, author, magazine_name)
-                    
                     total_articles_extracted += 1
                     logger.info(f"    -> 已保存: {output_path.name} (作者: {author})")
-                
                 break 
             else:
                 logger.warning(f"  [跳过] 文件 {epub_path.name} 未提取到有效文章，尝试下一个...")
@@ -168,13 +150,13 @@ def process_all_magazines():
 
 
 def generate_website():
-    logger.info("--- 开始生成网站 (秀丽字体版) ---")
+    logger.info("--- 开始生成网站 (秀丽字体最终版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     
-    ### [秀丽字体版] EB Garamond + Noto Serif SC ###
+    ### [秀丽字体最终版] Cormorant Garamond + Noto Serif SC ###
     shared_style_and_script = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:wght@400;700&family=Noto+Serif+SC:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;700&family=Noto+Serif+SC:wght@400;700&display=swap');
     body { background-color: #010409; color: #e6edf3; margin: 0; }
     #dynamic-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
 </style>
@@ -187,25 +169,25 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>外刊阅读</title>""" + shared_style_and_script + """
 <style>
-    body, h1, h2, h3, p, span, a, div { font-family: 'EB Garamond', 'Noto Serif SC', serif; }
+    body, h1, h2, h3, p, span, a, div { font-family: 'Cormorant Garamond', 'Noto Serif SC', serif; }
     .container { max-width: 1400px; margin: 0 auto; padding: 5rem 2rem; position: relative; z-index: 1; }
-    h1 { font-size: clamp(3rem, 7vw, 5rem); text-align: center; margin-bottom: 6rem; color: #fff; font-weight: 700; text-shadow: 0 0 30px rgba(0, 191, 255, 0.4); }
+    h1 { font-size: clamp(3.5rem, 8vw, 6rem); text-align: center; margin-bottom: 6rem; color: #fff; font-weight: 700; text-shadow: 0 0 30px rgba(0, 191, 255, 0.4); }
     .grid { display: grid; gap: 3rem; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); }
     .card {
-        background: rgba(13, 22, 38, 0.5); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
-        border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; padding: 2.5rem;
+        background: rgba(13, 22, 38, 0.4); backdrop-filter: blur(50px); -webkit-backdrop-filter: blur(50px);
+        border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 20px; padding: 2.5rem;
         box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2); transition: all 0.4s ease;
         display: flex; flex-direction: column;
     }
     .card:hover {
-        transform: translateY(-15px); background: rgba(20, 35, 58, 0.6);
-        box-shadow: 0 20px 50px rgba(0, 127, 255, 0.2); border-color: rgba(255, 255, 255, 0.2);
+        transform: translateY(-15px); background: rgba(20, 35, 58, 0.5);
+        box-shadow: 0 20px 50px rgba(0, 127, 255, 0.2); border-color: rgba(255, 255, 255, 0.15);
     }
-    .card-title { font-size: 1.5rem; font-weight: 700; line-height: 1.4; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
+    .card-title { font-size: 1.6rem; font-weight: 700; line-height: 1.4; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
     .card-meta { color: #b0c4de; font-size: 0.9rem; }
     .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
     .read-link { color:#87ceeb; text-decoration:none; font-weight: 700; font-size: 0.9rem; }
-    .no-articles { background: rgba(13, 22, 38, 0.5); backdrop-filter: blur(40px); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1); text-align:center; padding:5rem 2rem; color: #b0c4de;}
+    .no-articles { background: rgba(13, 22, 38, 0.4); backdrop-filter: blur(50px); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1); text-align:center; padding:5rem 2rem; color: #b0c4de;}
     .no-articles h2 { font-weight: 700; }
 </style></head><body><div class="container"><h1>外刊阅读</h1><div class="grid">
 {% for article in articles %}<div class="card"><h3 class="card-title">{{ article.title }}</h3><p class="card-meta">{{ article.magazine }} · {{ article.reading_time }}</p><div class="card-footer"><span class="card-meta">By {{ article.author }}</span><a href="{{ article.url }}" class="read-link">阅读 →</a></div></div>{% endfor %}
@@ -214,10 +196,10 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
     article_html_template = """
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }} | 外刊阅读</title>""" + shared_style_and_script + """
 <style>
-    body, h1, h2, h3, p, span, a, div { font-family: 'EB Garamond', 'Noto Serif SC', serif; }
+    body, h1, h2, h3, p, span, a, div { font-family: 'Cormorant Garamond', 'Noto Serif SC', serif; }
     .article-container {
         max-width: 760px; margin: 6rem auto; padding: clamp(3rem, 6vw, 5rem);
-        background: rgba(13, 22, 38, 0.6); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
+        background: rgba(13, 22, 38, 0.6); backdrop-filter: blur(50px); -webkit-backdrop-filter: blur(50px);
         border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1);
         position: relative; z-index: 1; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
     }
@@ -242,7 +224,6 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
                 m = re.search(fr'^{key}:\s*"?(.+?)"?\s*$', text, re.MULTILINE)
                 return m.group(1).strip() if m else "N/A"
             
-            # --- 修复：从 frontmatter 中读取所有元数据 ---
             title = get_meta('title', frontmatter)
             author = get_meta('author', frontmatter)
             magazine = get_meta('magazine', frontmatter)
