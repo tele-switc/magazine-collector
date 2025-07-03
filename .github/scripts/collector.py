@@ -83,8 +83,13 @@ def generate_title_from_content(text):
         if len(good_keywords) < 2: return nltk.sent_tokenize(text)[0].strip()
         return ' '.join(word.capitalize() for word in good_keywords[:5])
     except Exception as e:
-        logger.warning(f"  标题生成失败，使用备用方案: {e}")
-        return nltk.sent_tokenize(text)[0].strip() if text else "Untitled Article"
+        logger.warning(f"  标题AI生成失败，使用备用方案: {e}")
+        try:
+            # 主要备用方案：NLTK 分句
+            return nltk.sent_tokenize(text)[0].strip()
+        except Exception:
+            # 终极备用方案：如果NLTK也失败，手动按句号分割
+            return text.split('.')[0].strip()
 
 def save_article(output_path, text_content, title, author, magazine):
     word_count = len(text_content.split())
@@ -148,12 +153,10 @@ def process_all_magazines():
                 
     logger.info(f"\n--- 文章提取流程结束。共提取了 {total_articles_extracted} 篇新文章。 ---")
 
-
 def generate_website():
     logger.info("--- 开始生成网站 (秀丽字体最终版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     
-    ### [秀丽字体最终版] Cormorant Garamond + Noto Serif SC ###
     shared_style_and_script = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;700&family=Noto+Serif+SC:wght@400;700&display=swap');
