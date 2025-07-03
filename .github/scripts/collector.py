@@ -9,25 +9,46 @@ import markdown2
 import jinja2
 import nltk
 import glob
-from transformers import pipeline, AutoTokenizer
 
 # ==============================================================================
-# 1. 配置和初始化
+# 1. 配置和初始化 (NLTK 优先)
 # ==============================================================================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] - %(message)s')
 logger = logging.getLogger(__name__)
 
+# --- 终极修复 1：将 NLTK 设置提到所有操作的最前面 ---
 def setup_nltk():
-    nltk_data_path = Path.cwd() / "nltk_data"
-    nltk_data_path.mkdir(exist_ok=True)
-    nltk.data.path.append(str(nltk_data_path))
-    required_packages = {'tokenizers/punkt': 'punkt'}
-    for path, package_id in required_packages.items():
-        try: nltk.data.find(path); logger.info(f"[NLTK] '{package_id}' 已存在。")
+    """
+    检查并下载NLTK数据包，这是所有后续操作的基础。
+    """
+    try:
+        nltk_data_path = Path.cwd() / "nltk_data"
+        if not nltk_data_path.exists():
+            nltk_data_path.mkdir()
+        
+        # 将本地路径加入NLTK的搜索列表
+        if str(nltk_data_path) not in nltk.data.path:
+            nltk.data.path.append(str(nltk_data_path))
+
+        # 检查并下载'punkt'
+        try:
+            nltk.data.find('tokenizers/punkt')
+            logger.info("[NLTK] 'punkt' 数据包已存在。")
         except LookupError:
-            logger.info(f"[NLTK] '{package_id}' 未找到，开始下载...")
-            nltk.download(package_id, download_dir=str(nltk_data_path))
+            logger.info("[NLTK] 'punkt' 数据包未找到，开始下载...")
+            nltk.download('punkt', download_dir=str(nltk_data_path))
+            logger.info("[NLTK] 'punkt' 下载完成。")
+            
+    except Exception as e:
+        logger.error(f"NLTK 初始化失败: {e}")
+        # 在这种情况下，后续依赖NLTK的功能可能会失败
+        # 但我们让程序继续，看是否能处理不依赖NLTK的部分
+
+# 在导入任何可能依赖NLTK的库（如transformers）之前，先执行设置
 setup_nltk()
+
+# 现在可以安全地导入 transformers
+from transformers import pipeline, AutoTokenizer
 
 BASE_DIR = Path('.').resolve()
 SOURCE_REPO_PATH = BASE_DIR / "source_repo"
@@ -84,20 +105,21 @@ def process_epub_file(epub_path):
         logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=False)
     return articles
 
+### [终极修复 2] 使用Tokenizer确保AI输入安全 ###
 def get_ai_metadata(text):
     title, category = "Untitled Article", "General"
     
     def get_safe_snippet(tokenizer, text, max_length=512):
-        tokens = tokenizer.encode(text)
-        safe_tokens = tokens[:max_length]
-        return tokenizer.decode(safe_tokens, skip_special_tokens=True)
+        tokens = tokenizer.encode(text, truncation=True, max_length=max_length)
+        return tokenizer.decode(tokens, skip_special_tokens=True)
 
     if summarizer:
         try:
             snippet = get_safe_snippet(summarizer_tokenizer, text, max_length=1024)
             summary = summarizer(snippet, max_length=30, min_length=8, do_sample=False)
             title = summary[0]['summary_text'].strip()
-        except Exception:
+        except Exception as e:
+            logger.warning(f"  AI标题生成失败，使用备用方案: {e}")
             title = nltk.sent_tokenize(text)[0].strip()
     else:
         title = nltk.sent_tokenize(text)[0].strip()
@@ -111,7 +133,6 @@ def get_ai_metadata(text):
         except Exception as e:
             logger.warning(f"  AI分类失败: {e}")
 
-    # --- 最终加固：确保标题不会过长 ---
     if len(title) > 150:
         title = title[:150] + "..."
 
@@ -171,7 +192,7 @@ def process_all_magazines():
 
 
 def generate_website():
-    logger.info("--- 开始生成网站 (终极完美版) ---")
+    logger.info("--- 开始生成网站 (秀丽字体最终版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     shared_style_and_script = """
 <style>
@@ -181,7 +202,7 @@ def generate_website():
 </style>
 <canvas id="dynamic-canvas"></canvas>
 <script>
-document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementById("dynamic-canvas");if(!e)return;const t=e.getContext("2d");let n=[],o=[];const s=window.innerWidth>768?120:50,i={x:null,y:null,radius:100};const l=()=>{e.width=window.innerWidth,e.height=window.innerHeight};window.addEventListener("resize",l),l(),window.addEventListener("mousemove",e=>{i.x=e.clientX,i.y=e.clientY}),window.addEventListener("mouseout",()=>{i.x=null,i.y=null});class a{constructor(){this.x=Math.random()*e.width,this.y=Math.random()*e.height,this.size=Math.random()*1.5+.5,this.speedX=.4*(Math.random()-.5),this.speedY=.4*(Math.random()-.5),this.opacity=.2+Math.random()*.5}update(){(this.x<0||this.x>e.width)&&(this.speedX*=-1),(this.y<0||this.y>e.height)&&(this.speedY*=-1),this.x+=this.speedX,this.y+=this.speedY,i.x&&(()=>{const e=i.x-this.x,t=i.y-this.y,n=Math.hypot(e,t);if(n<i.radius){const o=(i.radius-n)/i.radius;this.x-=e/n*o,this.y-=t/n*o}})()}draw(){t.fillStyle=`rgba(0, 191, 255, ${this.opacity})`,t.beginPath(),t.arc(this.x,this.y,this.size,0,2*Math.PI),t.fill()}}class r{constructor(){this.reset()}reset(){this.x=Math.random()*e.width+100,this.y=-10,this.len=10+80*Math.random(),this.speed=6+8*Math.random(),this.size=.5+1*Math.random(),this.active=!0}update(){this.active&&(this.x-=this.speed,this.y+=this.speed,(this.x<-this.len||this.y>e.height+this.len)&&(this.active=!1))}draw(){this.active&&(t.strokeStyle="#00BFFF",t.lineWidth=this.size,t.beginPath(),t.moveTo(this.x,this.y),t.lineTo(this.x-this.len,this.y+this.len),t.stroke())}}function c(){for(let e=0;e<s;e++)n.push(new a())}function h(){o.length<3&&Math.random()>.99&&o.push(new r),o=o.filter(e=>e.active)}!function d(){t.clearRect(0,0,e.width,e.height),n.forEach(e=>{e.update(),e.draw()}),h(),o.forEach(e=>{e.update(),e.draw()}),requestAnimationFrame(d)}(),c()});
+document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementById("dynamic-canvas");if(!e)return;const t=e.getContext("2d");let n=[],o=[];const s=window.innerWidth>768?120:50,i={x:null,y:null,radius:100};const l=()=>{e.width=window.innerWidth,e.height=window.innerHeight};window.addEventListener("resize",l),l(),window.addEventListener("mousemove",e=>{i.x=e.clientX,i.y=e.clientY}),window.addEventListener("mouseout",()=>{i.x=null,i.y=null});class a{constructor(){this.x=Math.random()*e.width,this.y=Math.random()*e.height,this.size=Math.random()*1.5+.5,this.speedX=.4*(Math.random()-.5),this.speedY=.4*(Math.random()-.5),this.opacity=.2+Math.random()*.5}update(){(this.x<0||this.x>e.width)&&(this.speedX*=-1),(this.y<0||this.y>e.height)&&(this.speedY*=-1),this.x+=this.speedX,this.y+=this.speedY,i.x&&(()=>{const e=i.x-this.x,t=i.y-this.y,n=Math.hypot(e,t);if(n<i.radius){const o=(i.radius-n)/i.radius;this.x-=e/n*o,this.y-=t/n*o}})()}draw(){t.fillStyle=`rgba(0, 191, 255, ${this.opacity})`,t.beginPath(),t.arc(this.x,this.y,this.size,0,2*Math.PI),t.fill()}}class r{constructor(){this.reset()}reset(){this.x=Math.random()*e.width+100,this.y=-10,this.len=10+80*Math.random(),this.speed=6+8*Math.random(),this.size=.5+1*Math.random(),active=!0}update(){this.active&&(this.x-=this.speed,this.y+=this.speed,(this.x<-this.len||this.y>e.height+this.len)&&(this.active=!1))}draw(){this.active&&(t.strokeStyle="#00BFFF",t.lineWidth=this.size,t.beginPath(),t.moveTo(this.x,this.y),t.lineTo(this.x-this.len,this.y+this.len),t.stroke())}}function c(){for(let e=0;e<s;e++)n.push(new a())}function h(){o.length<3&&Math.random()>.99&&o.push(new r),o=o.filter(e=>e.active)}!function d(){t.clearRect(0,0,e.width,e.height),n.forEach(e=>{e.update(),e.draw()}),h(),o.forEach(e=>{e.update(),e.draw()}),requestAnimationFrame(d)}(),c()});
 </script>"""
     index_template_str = """
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
