@@ -18,16 +18,18 @@ jobs:
       - name: Clone source repository
         run: git clone --depth=1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo
 
+      # --- 终极修复 1：移除 cache: 'pip' ---
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip' # 缓存依赖，加快AI库的安装
 
+      # --- 终极修复 2：正确安装所有依赖 ---
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           # 安装AI模型所需的库: transformers, torch (PyTorch), sentencepiece
+          # 以及其他所有基础库
           pip install beautifulsoup4 ebooklib lxml nltk markdown2 jinja2 scikit-learn transformers torch sentencepiece
 
       - name: Run collector script
