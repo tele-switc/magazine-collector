@@ -1,7 +1,5 @@
-# 工作流名称
 name: Magazine Article Collector
 
-# 触发工作流的事件
 on:
   schedule:
     - cron: '0 1 * * *'
@@ -10,49 +8,41 @@ on:
     branches:
       - main
 
-# 定义工作流中的任务
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 步骤 1: 检出当前仓库代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤 2: 克隆包含 EPUB 源文件的仓库
       - name: Clone source repository
         run: git clone --depth=1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo
 
-      # 步骤 3: 设置 Python 环境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      # 步骤 4: 安装 Python 依赖和 NLTK 数据包
+      # --- 胜利修复：补上缺失的 NLTK 数据包 ---
       - name: Install dependencies and NLTK data
         run: |
           python -m pip install --upgrade pip
           pip install beautifulsoup4 ebooklib lxml nltk markdown2 jinja2 scikit-learn
+          # 下载所有需要的数据包：punkt, stopwords, averaged_perceptron_tagger
           python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True); nltk.download('averaged_perceptron_tagger', quiet=True)"
 
-      # 步骤 5: 运行核心脚本来提取文章和生成网站
       - name: Run collector script
-        # 关键修复：根据您的项目结构，指定 collector.py 的正确路径
         run: python ./.github/scripts/collector.py
         
-      # 步骤 6: (调试用) 列出生成的文件，方便检查结果
       - name: DEBUG - List generated files
         if: always()
         run: ls -R
 
-      # 步骤 7: 上传构建好的网站内容 (./docs 目录)
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./docs
 
-  # 第二个任务：部署到 GitHub Pages
   deploy:
     needs: build
     permissions:
