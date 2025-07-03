@@ -8,9 +8,8 @@ import logging
 import markdown2
 import jinja2
 import nltk
-from sklearn.feature_extraction.text import TfidfVectorizer
-from nltk.corpus import stopwords
 import glob
+from transformers import pipeline
 
 # ==============================================================================
 # 1. 配置和初始化
@@ -18,8 +17,21 @@ import glob
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] - %(message)s')
 logger = logging.getLogger(__name__)
 
-if 'NLTK_DATA' in os.environ:
-    nltk.data.path.append(os.environ['NLTK_DATA'])
+# --- NLTK 自检和安装 ---
+def setup_nltk():
+    nltk_data_path = Path.cwd() / "nltk_data"
+    nltk_data_path.mkdir(exist_ok=True)
+    nltk.data.path.append(str(nltk_data_path))
+    required_packages = {'tokenizers/punkt': 'punkt'}
+    for path, package_id in required_packages.items():
+        try:
+            nltk.data.find(path)
+            logger.info(f"[NLTK] 数据包 '{package_id}' 已存在。")
+        except LookupError:
+            logger.info(f"[NLTK] 数据包 '{package_id}' 未找到，开始下载...")
+            nltk.download(package_id, download_dir=str(nltk_data_path))
+
+setup_nltk()
 
 BASE_DIR = Path('.').resolve()
 SOURCE_REPO_PATH = BASE_DIR / "source_repo"
@@ -33,10 +45,22 @@ NON_ARTICLE_KEYWORDS = [
 ]
 
 MAGAZINES = {
-    "The Economist": {"match_key": "economist", "topic": "world_affairs"},
-    "Wired":         {"match_key": "wired", "topic": "technology"},
-    "The Atlantic":  {"match_key": "atlantic", "topic": "world_affairs"}
+    "The Economist": {"match_key": "economist"},
+    "Wired":         {"match_key": "wired"},
+    "The Atlantic":  {"match_key": "atlantic"}
 }
+
+# --- AI 模型初始化 ---
+# 使用轻量级模型以确保在GitHub Actions中高效运行
+logger.info("正在初始化AI模型...")
+try:
+    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-6-6")
+    classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
+    logger.info("AI模型初始化成功！")
+except Exception as e:
+    logger.error(f"AI模型初始化失败: {e}. 后续AI功能将不可用。")
+    summarizer = None
+    classifier = None
 
 # ==============================================================================
 # 2. 核心功能函数
@@ -44,8 +68,7 @@ MAGAZINES = {
 def setup_directories():
     ARTICLES_DIR.mkdir(exist_ok=True)
     WEBSITE_DIR.mkdir(exist_ok=True)
-    for info in MAGAZINES.values():
-        (ARTICLES_DIR / info['topic']).mkdir(exist_ok=True)
+    (ARTICLES_DIR / "ai_generated").mkdir(exist_ok=True) # 创建一个统一的目录
 
 def process_epub_file(epub_path):
     articles = []
@@ -55,57 +78,60 @@ def process_epub_file(epub_path):
         for item in items:
             soup = BeautifulSoup(item.get_content(), 'lxml')
             paragraphs = soup.find_all('p')
-            if len(paragraphs) < 5: continue
+            if len(paragraphs) < 8: continue
             text_from_paragraphs = [p.get_text(strip=True) for p in paragraphs]
             text_content = "\n\n".join(p for p in text_from_paragraphs if p)
-            if len(text_content.split()) > 100 and not any(kw in text_content[:500].lower() for kw in NON_ARTICLE_KEYWORDS):
+            if 400 < len(text_content.split()) < 5000 and not any(kw in text_content[:500].lower() for kw in NON_ARTICLE_KEYWORDS):
                 articles.append(text_content)
     except Exception as e:
         logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=False)
     return articles
 
-def generate_title_from_content(text):
-    try:
-        corpus = [text]
-        stop_words = list(stopwords.words('english')) + ['would', 'could', 'said', 'also', 'like', 'one', 'two', 'mr', 'ms']
-        vectorizer = TfidfVectorizer(max_features=10, stop_words=stop_words, ngram_range=(1, 3), token_pattern=r'(?u)\b[a-zA-Z-]{4,}\b')
-        vectorizer.fit(corpus)
-        feature_names = vectorizer.get_feature_names_out()
-        
-        if not feature_names.any(): return nltk.sent_tokenize(text)[0].strip()
+### [AI大脑升级] 智能标题和分类 ###
+def get_ai_metadata(text):
+    title, category = "Untitled Article", "General"
+    
+    # 截取文章主体部分以提高AI效率和准确性
+    text_snippet = ' '.join(text.split()[:512])
 
-        good_keywords = []
-        for keyword in feature_names:
-            pos_tags = nltk.pos_tag(nltk.word_tokenize(keyword))
-            if any(tag.startswith('NN') or tag.startswith('JJ') for _, tag in pos_tags):
-                good_keywords.append(keyword)
-
-        if len(good_keywords) < 2: return nltk.sent_tokenize(text)[0].strip()
-        return ' '.join(word.capitalize() for word in good_keywords[:5])
-    except Exception as e:
-        logger.warning(f"  标题AI生成失败，使用备用方案: {e}")
+    # 1. AI 智能标题生成
+    if summarizer:
         try:
-            # 主要备用方案：NLTK 分句
-            return nltk.sent_tokenize(text)[0].strip()
-        except Exception:
-            # 终极备用方案：如果NLTK也失败，手动按句号分割
-            return text.split('.')[0].strip()
+            # max_length=20, min_length=5: 生成一个简短、像标题一样的摘要
+            summary = summarizer(text_snippet, max_length=20, min_length=5, do_sample=False)
+            title = summary[0]['summary_text'].strip()
+        except Exception as e:
+            logger.warning(f"  AI标题生成失败，使用备用方案: {e}")
+            title = nltk.sent_tokenize(text)[0].strip()
+    else:
+        title = nltk.sent_tokenize(text)[0].strip()
 
-def save_article(output_path, text_content, title, author, magazine):
+    # 2. AI 自动分类
+    if classifier:
+        try:
+            candidate_labels = ['technology', 'politics', 'business', 'science', 'culture', 'world affairs']
+            result = classifier(text_snippet, candidate_labels)
+            category = result['labels'][0].capitalize()
+        except Exception as e:
+            logger.warning(f"  AI分类失败: {e}")
+            category = "General" # 默认分类
+
+    return title, category
+
+def save_article(output_path, text_content, title, author, magazine, category):
     word_count = len(text_content.split())
     reading_time = f"~{max(1, round(word_count / 230))} min read"
     safe_title = title.replace('"', "'")
-    frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nmagazine: "{magazine}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
+    frontmatter = f'---\ntitle: "{safe_title}"\nauthor: "{author}"\nmagazine: "{magazine}"\ncategory: "{category}"\nwords: {word_count}\nreading_time: "{reading_time}"\n---\n\n'
     output_path.write_text(frontmatter + text_content, encoding="utf-8")
 
 def extract_date_from_path(path):
     match = re.search(r'(\d{4}[-.]\d{2}[-.]\d{2})', path.name)
-    if match:
-        return match.group(1).replace('-', '.')
+    if match: return match.group(1).replace('-', '.')
     return "1970.01.01"
 
 def process_all_magazines():
-    logger.info("--- 开始文章提取流程 (精加工版) ---")
+    logger.info("--- 开始文章提取流程 (AI大脑版) ---")
     
     if not SOURCE_REPO_PATH.is_dir():
         logger.error(f"致命错误: 源仓库目录 '{SOURCE_REPO_PATH}' 不存在！")
@@ -139,22 +165,23 @@ def process_all_magazines():
                 logger.info(f"  [成功] 在文件 {epub_path.name} 中找到 {len(articles)} 篇有效文章。")
                 
                 for i, article_content in enumerate(articles):
-                    title = generate_title_from_content(article_content)
+                    title, category = get_ai_metadata(article_content)
                     author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+){1,3})', article_content[:800])
                     author = author_match.group(1).strip() if author_match else "N/A"
                     stem = f"{magazine_name.replace(' ', '_')}_{epub_path.stem.replace(' ', '_')}"
-                    output_path = ARTICLES_DIR / MAGAZINES[magazine_name]['topic'] / f"{stem}_art{i+1}.md"
-                    save_article(output_path, article_content, title, author, magazine_name)
+                    output_path = ARTICLES_DIR / "ai_generated" / f"{stem}_art{i+1}.md"
+                    save_article(output_path, article_content, title, author, magazine_name, category)
                     total_articles_extracted += 1
-                    logger.info(f"    -> 已保存: {output_path.name} (作者: {author})")
+                    logger.info(f"    -> 已保存: {output_path.name} (分类: {category}, 作者: {author})")
                 break 
             else:
                 logger.warning(f"  [跳过] 文件 {epub_path.name} 未提取到有效文章，尝试下一个...")
                 
     logger.info(f"\n--- 文章提取流程结束。共提取了 {total_articles_extracted} 篇新文章。 ---")
 
+
 def generate_website():
-    logger.info("--- 开始生成网站 (秀丽字体最终版) ---")
+    logger.info("--- 开始生成网站 (AI大脑版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     
     shared_style_and_script = """
@@ -182,18 +209,25 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
         box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2); transition: all 0.4s ease;
         display: flex; flex-direction: column;
     }
-    .card:hover {
-        transform: translateY(-15px); background: rgba(20, 35, 58, 0.5);
-        box-shadow: 0 20px 50px rgba(0, 127, 255, 0.2); border-color: rgba(255, 255, 255, 0.15);
-    }
-    .card-title { font-size: 1.6rem; font-weight: 700; line-height: 1.4; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
-    .card-meta { color: #b0c4de; font-size: 0.9rem; }
-    .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+    .card:hover { transform: translateY(-15px); background: rgba(20, 35, 58, 0.5); box-shadow: 0 20px 50px rgba(0, 127, 255, 0.2); border-color: rgba(255, 255, 255, 0.15); }
+    .card-title { font-size: 1.5rem; font-weight: 700; line-height: 1.4; color: #f0f6fc; margin: 0 0 1rem 0; flex-grow: 1; }
+    .card-meta { color: #b0c4de; font-size: 0.9rem; margin-bottom: 1rem; }
+    .card-category { display: inline-block; background-color: rgba(0, 191, 255, 0.1); color: #87ceeb; padding: 0.25rem 0.75rem; border-radius: 1rem; font-size: 0.8rem; font-weight: 700; margin-top: auto; }
+    .card-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.1); }
     .read-link { color:#87ceeb; text-decoration:none; font-weight: 700; font-size: 0.9rem; }
-    .no-articles { background: rgba(13, 22, 38, 0.4); backdrop-filter: blur(50px); border-radius: 20px; border: 1px solid rgba(255, 255, 255, 0.1); text-align:center; padding:5rem 2rem; color: #b0c4de;}
-    .no-articles h2 { font-weight: 700; }
+    .no-articles { background: rgba(13, 22, 38, 0.4); backdrop-filter: blur(50px); border-radius: 20px; text-align:center; padding:5rem 2rem; }
 </style></head><body><div class="container"><h1>外刊阅读</h1><div class="grid">
-{% for article in articles %}<div class="card"><h3 class="card-title">{{ article.title }}</h3><p class="card-meta">{{ article.magazine }} · {{ article.reading_time }}</p><div class="card-footer"><span class="card-meta">By {{ article.author }}</span><a href="{{ article.url }}" class="read-link">阅读 →</a></div></div>{% endfor %}
+{% for article in articles %}<div class="card">
+    <div>
+        <h3 class="card-title">{{ article.title }}</h3>
+        <p class="card-meta">{{ article.magazine }} · {{ article.reading_time }}</p>
+    </div>
+    <div style="flex-grow: 1;"></div>
+    <div class="card-footer">
+        <span class="card-category">{{ article.category }}</span>
+        <a href="{{ article.url }}" class="read-link">阅读 →</a>
+    </div>
+</div>{% endfor %}
 </div>{% if not articles %}<div class="no-articles"><h2>未发现文章</h2><p>引擎已运行，但本次未处理新的文章。</p></div>{% endif %}</div></body></html>"""
 
     article_html_template = """
@@ -214,7 +248,8 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
 </style></head><body><div class="article-container"><a href="index.html" class="back-link">← 返回列表</a><h1>{{ title }}</h1><p class="article-meta">By {{ author }} · From {{ magazine }} · {{ reading_time }}</p><div class="article-body">{{ content }}</div></div></body></html>"""
 
     articles_data = []
-    md_files = glob.glob(str(ARTICLES_DIR / '**/*.md'), recursive=True)
+    # 现在只从一个统一的目录读取
+    md_files = glob.glob(str(ARTICLES_DIR / 'ai_generated' / '*.md'), recursive=True)
     logger.info(f"找到 {len(md_files)} 个 Markdown 文件用于生成网页。")
     for md_file_path in md_files:
         try:
@@ -227,15 +262,12 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
                 m = re.search(fr'^{key}:\s*"?(.+?)"?\s*$', text, re.MULTILINE)
                 return m.group(1).strip() if m else "N/A"
             
-            title = get_meta('title', frontmatter)
-            author = get_meta('author', frontmatter)
-            magazine = get_meta('magazine', frontmatter)
-            reading_time = get_meta('reading_time', frontmatter)
+            title, author, magazine, category, reading_time = [get_meta(k, frontmatter) for k in ['title', 'author', 'magazine', 'category', 'reading_time']]
 
             article_filename, article_path = f"{md_file.stem}.html", WEBSITE_DIR / f"{md_file.stem}.html"
             article_html = jinja2.Template(article_html_template).render(title=title, content=markdown2.markdown(content), author=author, magazine=magazine, reading_time=reading_time)
             article_path.write_text(article_html, encoding='utf-8')
-            articles_data.append({"title": title, "url": article_filename, "magazine": magazine, "author": author, "reading_time": reading_time})
+            articles_data.append({"title": title, "url": article_filename, "magazine": magazine, "author": author, "category": category, "reading_time": reading_time})
         except Exception as e:
             logger.error(f"生成网页 {md_file_path} 失败: {e}")
     
