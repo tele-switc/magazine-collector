@@ -9,7 +9,7 @@ import markdown2
 import jinja2
 import nltk
 import glob
-from transformers import pipeline
+from transformers import pipeline, AutoTokenizer
 
 # ==============================================================================
 # 1. 配置和初始化
@@ -23,11 +23,9 @@ def setup_nltk():
     nltk.data.path.append(str(nltk_data_path))
     required_packages = {'tokenizers/punkt': 'punkt'}
     for path, package_id in required_packages.items():
-        try:
-            nltk.data.find(path)
-            logger.info(f"[NLTK] 数据包 '{package_id}' 已存在。")
+        try: nltk.data.find(path); logger.info(f"[NLTK] '{package_id}' 已存在。")
         except LookupError:
-            logger.info(f"[NLTK] 数据包 '{package_id}' 未找到，开始下载...")
+            logger.info(f"[NLTK] '{package_id}' 未找到，开始下载...")
             nltk.download(package_id, download_dir=str(nltk_data_path))
 setup_nltk()
 
@@ -50,13 +48,16 @@ MAGAZINES = {
 
 logger.info("正在初始化AI模型...")
 try:
-    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-6-6")
-    classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
-    logger.info("AI模型初始化成功！")
+    SUMMARIZER_MODEL = "sshleifer/distilbart-cnn-6-6"
+    CLASSIFIER_MODEL = "facebook/bart-large-mnli"
+    summarizer = pipeline("summarization", model=SUMMARIZER_MODEL)
+    summarizer_tokenizer = AutoTokenizer.from_pretrained(SUMMARIZER_MODEL)
+    classifier = pipeline("zero-shot-classification", model=CLASSIFIER_MODEL)
+    classifier_tokenizer = AutoTokenizer.from_pretrained(CLASSIFIER_MODEL)
+    logger.info("AI模型和分词器初始化成功！")
 except Exception as e:
     logger.error(f"AI模型初始化失败: {e}. 后续AI功能将不可用。")
-    summarizer = None
-    classifier = None
+    summarizer, classifier = None, None
 
 # ==============================================================================
 # 2. 核心功能函数
@@ -77,7 +78,7 @@ def process_epub_file(epub_path):
             if len(paragraphs) < 8: continue
             text_from_paragraphs = [p.get_text(strip=True) for p in paragraphs]
             text_content = "\n\n".join(p for p in text_from_paragraphs if p)
-            if 400 < len(text_content.split()) < 5000 and not any(kw in text_content[:500].lower() for kw in NON_ARTICLE_KEYWORDS):
+            if 400 < len(text_content.split()) < 4000:
                 articles.append(text_content)
     except Exception as e:
         logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=False)
@@ -85,23 +86,35 @@ def process_epub_file(epub_path):
 
 def get_ai_metadata(text):
     title, category = "Untitled Article", "General"
-    text_snippet = ' '.join(text.split()[:512])
+    
+    def get_safe_snippet(tokenizer, text, max_length=512):
+        tokens = tokenizer.encode(text)
+        safe_tokens = tokens[:max_length]
+        return tokenizer.decode(safe_tokens, skip_special_tokens=True)
+
     if summarizer:
         try:
-            summary = summarizer(text_snippet, max_length=20, min_length=5, do_sample=False)
+            snippet = get_safe_snippet(summarizer_tokenizer, text, max_length=1024)
+            summary = summarizer(snippet, max_length=30, min_length=8, do_sample=False)
             title = summary[0]['summary_text'].strip()
-        except Exception as e:
-            logger.warning(f"  AI标题生成失败: {e}")
+        except Exception:
             title = nltk.sent_tokenize(text)[0].strip()
     else:
         title = nltk.sent_tokenize(text)[0].strip()
+
     if classifier:
         try:
+            snippet = get_safe_snippet(classifier_tokenizer, text, max_length=512)
             candidate_labels = ['technology', 'politics', 'business', 'science', 'culture', 'world affairs']
-            result = classifier(text_snippet, candidate_labels)
+            result = classifier(snippet, candidate_labels)
             category = result['labels'][0].capitalize()
         except Exception as e:
             logger.warning(f"  AI分类失败: {e}")
+
+    # --- 最终加固：确保标题不会过长 ---
+    if len(title) > 150:
+        title = title[:150] + "..."
+
     return title, category
 
 def save_article(output_path, text_content, title, author, magazine, category):
@@ -117,7 +130,7 @@ def extract_date_from_path(path):
     return "1970.01.01"
 
 def process_all_magazines():
-    logger.info("--- 开始文章提取流程 (AI大脑版) ---")
+    logger.info("--- 开始文章提取流程 (终极完美版) ---")
     if not SOURCE_REPO_PATH.is_dir():
         logger.error(f"致命错误: 源仓库目录 '{SOURCE_REPO_PATH}' 不存在！")
         return
@@ -158,7 +171,7 @@ def process_all_magazines():
 
 
 def generate_website():
-    logger.info("--- 开始生成网站 (AI大脑版) ---")
+    logger.info("--- 开始生成网站 (终极完美版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
     shared_style_and_script = """
 <style>
