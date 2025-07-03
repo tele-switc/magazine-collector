@@ -17,7 +17,6 @@ from transformers import pipeline
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- NLTK 自检和安装 ---
 def setup_nltk():
     nltk_data_path = Path.cwd() / "nltk_data"
     nltk_data_path.mkdir(exist_ok=True)
@@ -30,7 +29,6 @@ def setup_nltk():
         except LookupError:
             logger.info(f"[NLTK] 数据包 '{package_id}' 未找到，开始下载...")
             nltk.download(package_id, download_dir=str(nltk_data_path))
-
 setup_nltk()
 
 BASE_DIR = Path('.').resolve()
@@ -50,8 +48,6 @@ MAGAZINES = {
     "The Atlantic":  {"match_key": "atlantic"}
 }
 
-# --- AI 模型初始化 ---
-# 使用轻量级模型以确保在GitHub Actions中高效运行
 logger.info("正在初始化AI模型...")
 try:
     summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-6-6")
@@ -68,7 +64,7 @@ except Exception as e:
 def setup_directories():
     ARTICLES_DIR.mkdir(exist_ok=True)
     WEBSITE_DIR.mkdir(exist_ok=True)
-    (ARTICLES_DIR / "ai_generated").mkdir(exist_ok=True) # 创建一个统一的目录
+    (ARTICLES_DIR / "ai_generated").mkdir(exist_ok=True)
 
 def process_epub_file(epub_path):
     articles = []
@@ -87,26 +83,18 @@ def process_epub_file(epub_path):
         logger.error(f"  解析EPUB {epub_path.name} 出错: {e}", exc_info=False)
     return articles
 
-### [AI大脑升级] 智能标题和分类 ###
 def get_ai_metadata(text):
     title, category = "Untitled Article", "General"
-    
-    # 截取文章主体部分以提高AI效率和准确性
     text_snippet = ' '.join(text.split()[:512])
-
-    # 1. AI 智能标题生成
     if summarizer:
         try:
-            # max_length=20, min_length=5: 生成一个简短、像标题一样的摘要
             summary = summarizer(text_snippet, max_length=20, min_length=5, do_sample=False)
             title = summary[0]['summary_text'].strip()
         except Exception as e:
-            logger.warning(f"  AI标题生成失败，使用备用方案: {e}")
+            logger.warning(f"  AI标题生成失败: {e}")
             title = nltk.sent_tokenize(text)[0].strip()
     else:
         title = nltk.sent_tokenize(text)[0].strip()
-
-    # 2. AI 自动分类
     if classifier:
         try:
             candidate_labels = ['technology', 'politics', 'business', 'science', 'culture', 'world affairs']
@@ -114,8 +102,6 @@ def get_ai_metadata(text):
             category = result['labels'][0].capitalize()
         except Exception as e:
             logger.warning(f"  AI分类失败: {e}")
-            category = "General" # 默认分类
-
     return title, category
 
 def save_article(output_path, text_content, title, author, magazine, category):
@@ -132,16 +118,13 @@ def extract_date_from_path(path):
 
 def process_all_magazines():
     logger.info("--- 开始文章提取流程 (AI大脑版) ---")
-    
     if not SOURCE_REPO_PATH.is_dir():
         logger.error(f"致命错误: 源仓库目录 '{SOURCE_REPO_PATH}' 不存在！")
         return
-
     found_epubs = [Path(root) / file for root, _, files in os.walk(SOURCE_REPO_PATH) for file in files if file.endswith('.epub')]
     if not found_epubs:
         logger.warning("在源仓库中未找到任何 .epub 文件。")
         return
-
     magazine_epubs = {name: [] for name in MAGAZINES}
     for path in found_epubs:
         path_str_lower = str(path).lower()
@@ -149,21 +132,16 @@ def process_all_magazines():
             if info["match_key"] in path_str_lower:
                 magazine_epubs[name].append(path)
                 break
-    
     total_articles_extracted = 0
     for magazine_name, epub_paths in magazine_epubs.items():
         if not epub_paths: continue
-        
         logger.info(f"\n>>> 处理杂志: {magazine_name}")
         sorted_epub_paths = sorted(epub_paths, key=extract_date_from_path, reverse=True)
-        
         for epub_path in sorted_epub_paths:
             logger.info(f"  尝试处理文件: {epub_path.name}")
             articles = process_epub_file(epub_path)
-            
             if articles:
                 logger.info(f"  [成功] 在文件 {epub_path.name} 中找到 {len(articles)} 篇有效文章。")
-                
                 for i, article_content in enumerate(articles):
                     title, category = get_ai_metadata(article_content)
                     author_match = re.search(r'(?:By|by|BY)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z\'-]+){1,3})', article_content[:800])
@@ -176,14 +154,12 @@ def process_all_magazines():
                 break 
             else:
                 logger.warning(f"  [跳过] 文件 {epub_path.name} 未提取到有效文章，尝试下一个...")
-                
     logger.info(f"\n--- 文章提取流程结束。共提取了 {total_articles_extracted} 篇新文章。 ---")
 
 
 def generate_website():
     logger.info("--- 开始生成网站 (AI大脑版) ---")
     WEBSITE_DIR.mkdir(exist_ok=True)
-    
     shared_style_and_script = """
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;700&family=Noto+Serif+SC:wght@400;700&display=swap');
@@ -194,7 +170,6 @@ def generate_website():
 <script>
 document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementById("dynamic-canvas");if(!e)return;const t=e.getContext("2d");let n=[],o=[];const s=window.innerWidth>768?120:50,i={x:null,y:null,radius:100};const l=()=>{e.width=window.innerWidth,e.height=window.innerHeight};window.addEventListener("resize",l),l(),window.addEventListener("mousemove",e=>{i.x=e.clientX,i.y=e.clientY}),window.addEventListener("mouseout",()=>{i.x=null,i.y=null});class a{constructor(){this.x=Math.random()*e.width,this.y=Math.random()*e.height,this.size=Math.random()*1.5+.5,this.speedX=.4*(Math.random()-.5),this.speedY=.4*(Math.random()-.5),this.opacity=.2+Math.random()*.5}update(){(this.x<0||this.x>e.width)&&(this.speedX*=-1),(this.y<0||this.y>e.height)&&(this.speedY*=-1),this.x+=this.speedX,this.y+=this.speedY,i.x&&(()=>{const e=i.x-this.x,t=i.y-this.y,n=Math.hypot(e,t);if(n<i.radius){const o=(i.radius-n)/i.radius;this.x-=e/n*o,this.y-=t/n*o}})()}draw(){t.fillStyle=`rgba(0, 191, 255, ${this.opacity})`,t.beginPath(),t.arc(this.x,this.y,this.size,0,2*Math.PI),t.fill()}}class r{constructor(){this.reset()}reset(){this.x=Math.random()*e.width+100,this.y=-10,this.len=10+80*Math.random(),this.speed=6+8*Math.random(),this.size=.5+1*Math.random(),this.active=!0}update(){this.active&&(this.x-=this.speed,this.y+=this.speed,(this.x<-this.len||this.y>e.height+this.len)&&(this.active=!1))}draw(){this.active&&(t.strokeStyle="#00BFFF",t.lineWidth=this.size,t.beginPath(),t.moveTo(this.x,this.y),t.lineTo(this.x-this.len,this.y+this.len),t.stroke())}}function c(){for(let e=0;e<s;e++)n.push(new a())}function h(){o.length<3&&Math.random()>.99&&o.push(new r),o=o.filter(e=>e.active)}!function d(){t.clearRect(0,0,e.width,e.height),n.forEach(e=>{e.update(),e.draw()}),h(),o.forEach(e=>{e.update(),e.draw()}),requestAnimationFrame(d)}(),c()});
 </script>"""
-
     index_template_str = """
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>外刊阅读</title>""" + shared_style_and_script + """
@@ -229,7 +204,6 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
     </div>
 </div>{% endfor %}
 </div>{% if not articles %}<div class="no-articles"><h2>未发现文章</h2><p>引擎已运行，但本次未处理新的文章。</p></div>{% endif %}</div></body></html>"""
-
     article_html_template = """
 <!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><title>{{ title }} | 外刊阅读</title>""" + shared_style_and_script + """
 <style>
@@ -246,9 +220,7 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
     .article-body { font-size: 1.15rem; line-height: 2.1; color: #dce3ec; }
     .article-body p { margin: 0 0 1.75em 0; }
 </style></head><body><div class="article-container"><a href="index.html" class="back-link">← 返回列表</a><h1>{{ title }}</h1><p class="article-meta">By {{ author }} · From {{ magazine }} · {{ reading_time }}</p><div class="article-body">{{ content }}</div></div></body></html>"""
-
     articles_data = []
-    # 现在只从一个统一的目录读取
     md_files = glob.glob(str(ARTICLES_DIR / 'ai_generated' / '*.md'), recursive=True)
     logger.info(f"找到 {len(md_files)} 个 Markdown 文件用于生成网页。")
     for md_file_path in md_files:
@@ -261,16 +233,13 @@ document.addEventListener('DOMContentLoaded',()=>{const e=document.getElementByI
             def get_meta(key, text):
                 m = re.search(fr'^{key}:\s*"?(.+?)"?\s*$', text, re.MULTILINE)
                 return m.group(1).strip() if m else "N/A"
-            
             title, author, magazine, category, reading_time = [get_meta(k, frontmatter) for k in ['title', 'author', 'magazine', 'category', 'reading_time']]
-
             article_filename, article_path = f"{md_file.stem}.html", WEBSITE_DIR / f"{md_file.stem}.html"
             article_html = jinja2.Template(article_html_template).render(title=title, content=markdown2.markdown(content), author=author, magazine=magazine, reading_time=reading_time)
             article_path.write_text(article_html, encoding='utf-8')
             articles_data.append({"title": title, "url": article_filename, "magazine": magazine, "author": author, "category": category, "reading_time": reading_time})
         except Exception as e:
             logger.error(f"生成网页 {md_file_path} 失败: {e}")
-    
     articles_data.sort(key=lambda x: (x['magazine'], x['title']))
     (WEBSITE_DIR / "index.html").write_text(jinja2.Template(index_template_str).render(articles=articles_data), encoding='utf-8')
     (WEBSITE_DIR / ".nojekyll").touch()
