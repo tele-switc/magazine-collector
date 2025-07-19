@@ -1,28 +1,27 @@
 import logging
+import os  # 明确导入os模块
 from pathlib import Path
 from ebooklib import epub
 from bs4 import BeautifulSoup
-import markdown2
+from markdown2 import markdown  # 导入缺失的markdown2模块
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# 【专家建议】动态、绝对地计算路径，确保万无一失
-# BASE_DIR 指向工作区的根目录 (e.g., /home/runner/work/magazine-collector/magazine-collector)
+# 动态计算绝对路径 - 关键修复
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-
-# SRC 指向我们检出的外部仓库
 SRC = BASE_DIR / "source_repo_1/01_economist"
-# DST 指向我们自己仓库的输出目录
-DST = BASE_DIR / "local_repo/docs/articles"
+DST = BASE_DIR / "docs/articles"
 
 def epub_to_md(epub_path: Path, out_dir: Path):
     """将单个 EPUB 文件转换为 Markdown 文件。"""
     try:
-        book = epub.read_epub(epub_path)
+        book = epub.read_epub(str(epub_path))  # 确保兼容字符串路径
         md_parts = []
-        for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
-            soup = BeautifulSoup(item.get_body_content(), 'lxml')
+        
+        # 修复：使用正确的项目类型常量
+        for item in book.get_items_of_type(epub.ITEM_DOCUMENT):
+            soup = BeautifulSoup(item.get_content(), 'lxml')
             md_parts.append(soup.get_text('\n'))
         
         md_text = '\n\n'.join(md_parts)
@@ -31,54 +30,111 @@ def epub_to_md(epub_path: Path, out_dir: Path):
         logging.info(f'✔︎ Success: Converted {epub_path.name} to {out_file.name}')
     except Exception as e:
         logging.error(f'✘ Failed to process {epub_path.name}: {e}')
+        logging.exception("详细错误:")  # 添加详细错误跟踪
 
 def generate_index_html(articles_dir: Path, output_dir: Path):
-    """根据生成的 .md 文件创建一个简单的 HTML 首页和详情页。"""
+    """创建 HTML 首页和文章页"""
+    # 创建必要的目录
+    articles_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 收集所有文章
     articles = []
     for md_file in articles_dir.glob('*.md'):
         articles.append({
             'title': md_file.stem,
-            'url': f"articles/{md_file.stem}.html" # 修正了详情页链接
+            'url': f"articles/{md_file.name.replace('.md', '.html')}"
         })
-
-    # 为每篇文章生成一个单独的 HTML 页面
-    for md_file in articles_dir.glob('*.md'):
-        html_article_path = output_dir / "articles" / f"{md_file.stem}.html"
-        html_article_path.parent.mkdir(exist_ok=True)
-        html_content = f"<!DOCTYPE html><html><head><title>{md_file.stem}</title></head><body>"
-        html_content += f"<h1>{md_file.stem}</h1>"
-        html_content += markdown2.markdown(md_file.read_text(encoding='utf-8'))
-        html_content += '<br/><a href="../index.html">Back to List</a>' # 修正了返回链接
-        html_content += "</body></html>"
-        html_article_path.write_text(html_content, encoding='utf-8')
-
-    # 生成首页
-    index_content = "<html><head><title>Articles</title></head><body><h1>Article List</h1><ul>"
+    
+    # 生成主页HTML
+    html_content = """
+    <html>
+    <head>
+        <title>电子书集锦</title>
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; line-height: 1.6; }
+            .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+            h1 { color: #2c3e50; }
+            ul { list-style: none; padding: 0; }
+            li { margin-bottom: 12px; padding: 8px; background: #f8f9fa; border-radius: 4px; }
+            a { color: #1a73e8; text-decoration: none; }
+            a:hover { text-decoration: underline; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>杂志文章集锦</h1>
+            <ul>
+    """
+    
     for article in sorted(articles, key=lambda x: x['title']):
-        index_content += f'<li><a href="{article["url"]}">{article["title"]}</a></li>'
-    index_content += "</ul></body></html>"
-    (output_dir / "index.html").write_text(index_content, encoding='utf-8')
+        html_content += f'<li><a href="{article["url"]}">{article["title"]}</a></li>\n'
+    
+    html_content += """
+            </ul>
+        </div>
+    </body>
+    </html>
+    """
+    
+    # 生成每篇文章的HTML页面
+    for md_file in articles_dir.glob('*.md'):
+        html_filename = md_file.name.replace('.md', '.html')
+        html_file_path = output_dir / "articles" / html_filename
+        html_file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 添加基本样式
+        md_content = md_file.read_text(encoding='utf-8')
+        html_content_single = markdown(md_content, extras=["tables"])
+        
+        with html_file_path.open('w', encoding='utf-8') as f:
+            f.write(f"""
+            <html>
+            <head>
+                <title>{md_file.stem}</title>
+                <meta charset="utf-8">
+                <style>
+                    body {{ max-width: 800px; margin: 0 auto; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; line-height: 1.6; }}
+                    h1 {{ color: #2c3e50; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
+                </style>
+            </head>
+            <body>
+                <h1>{md_file.stem}</h1>
+                {html_content_single}
+            </body>
+            </html>
+            """)
+    
+    # 保存主页
+    (output_dir / "index.html").write_text(html_content, encoding='utf-8')
     logging.info(f'✔︎ Generated index.html with {len(articles)} articles.')
 
 def main():
     """主函数"""
+    # 打印关键路径信息用于调试
+    logging.info(f"当前工作目录: {os.getcwd()}")
+    logging.info(f"基础目录: {BASE_DIR}")
+    logging.info(f"源目录: {SRC}")
+    
+    # 确认源目录是否存在
+    if not SRC.exists():
+        logging.error(f"❌ 源目录不存在: {SRC}")
+        # 列出可用目录
+        logging.info(f"可用目录: {', '.join(os.listdir(BASE_DIR))}")
+        return
+    
+    # 创建目标目录
     DST.mkdir(parents=True, exist_ok=True)
     
-    if not SRC.is_dir():
-        logging.error(f"Source directory not found: {SRC}")
-        # 【新增】打印出当前目录结构，帮助调试
-        logging.info("Current directory structure:")
-        os.system(f"ls -R {BASE_DIR}")
-        return
-
+    # 处理所有epub文件
     files = list(SRC.glob('*.epub'))
-    logging.info(f'Found {len(files)} EPUB file(s) in {SRC}')
+    logging.info(f'找到 {len(files)} 个EPUB文件')
     
     for f in files:
         epub_to_md(f, DST)
     
+    # 如果有文件被处理，生成HTML
     if files:
-        generate_index_html(DST, BASE_DIR / "local_repo/docs")
+        generate_index_html(DST, BASE_DIR / "docs")
 
 if __name__ == '__main__':
     main()
