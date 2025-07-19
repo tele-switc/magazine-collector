@@ -1,8 +1,8 @@
-name: Magazine Article Collector
+name: Global Journals Aggregator
 
 on:
   schedule:
-    - cron: '0 1 * * *'
+    - cron: '0 2 * * *' # 每天UTC时间2点 (北京时间早上10点)
   workflow_dispatch:
   push:
     branches:
@@ -19,8 +19,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Clone source repository
-        run: git clone --depth=1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo
+      - name: Clone Primary Source Repo (Awesome English Ebooks)
+        run: git clone --depth 1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo_1
+
+      - name: Clone Secondary Source Repo (Science Magazines)
+        run: git clone --depth 1 https://github.com/donal-tong/scientific-magazines.git source_repo_2
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -32,26 +35,20 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.NLTK_DATA }}
-          key: ${{ runner.os }}-nltk-v1
+          key: ${{ runner.os }}-nltk-v3
 
       - name: Install dependencies and NLTK data
         if: steps.cache-nltk.outputs.cache-hit != 'true'
         run: |
           python -m pip install --upgrade pip
-          pip install beautifulsoup4 ebooklib pdfplumber nltk markdown2 jinja2 scikit-learn
+          pip install beautifulsoup4 ebooklib nltk markdown2 jinja2 scikit-learn mobi
           python -c "import nltk; nltk.download(['punkt', 'stopwords', 'averaged_perceptron_tagger'], download_dir='${{ env.NLTK_DATA }}')"
 
-      - name: Install dependencies from cache
+      - name: Install cached dependencies
         if: steps.cache-nltk.outputs.cache-hit == 'true'
-        run: |
-          python -m pip install --upgrade pip
-          pip install beautifulsoup4 ebooklib pdfplumber nltk markdown2 jinja2 scikit-learn
+        run: python -m pip install --upgrade pip; pip install beautifulsoup4 ebooklib nltk markdown2 jinja2 scikit-learn mobi
 
-      # 【最终保险措施】在运行脚本前，确保 docs 文件夹一定存在
-      - name: Ensure docs directory exists
-        run: mkdir -p docs
-
-      - name: Run magazine collector script
+      - name: Run collector script
         env:
           NLTK_DATA: ${{ env.NLTK_DATA }}
         run: python ./.github/scripts/collector.py
