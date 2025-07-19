@@ -1,75 +1,48 @@
 name: Global Journals Aggregator
-
 on:
   schedule:
-    - cron: '0 2 * * *' # 每天UTC时间2点 (北京时间早上10点)
+    - cron: '0 2 * * *'
   workflow_dispatch:
   push:
     branches:
       - main
-
 env:
   PYTHON_VERSION: '3.10'
   NLTK_DATA: ${{ github.workspace }}/.cache/nltk_data
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # 【源 1】克隆我们已知可靠的主仓库
-      - name: Clone Primary Source Repo (Awesome English Ebooks)
+      - uses: actions/checkout@v4
+      - name: Clone Primary Source Repo
         run: git clone --depth 1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo_1
-
-      # 【源 2】【最终修复】克隆由你找到的、经过验证的、可靠的科学期刊仓库
-      - name: Clone Secondary Source Repo (Scientific American)
-        run: git clone --depth 1 https://github.com/Monkfishare/Scientific_American.git source_repo_2
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
+      - name: Clone Secondary Source Repo
+        run: git clone --depth 1 https://github.com/y-avg/Scientific-Magazines.git source_repo_2
+      - uses: actions/setup-python@v4
+        with: { python-version: ${{ env.PYTHON_VERSION }} }
       - name: Cache NLTK data
         id: cache-nltk
         uses: actions/cache@v4
-        with:
-          path: ${{ env.NLTK_DATA }}
-          key: ${{ runner.os }}-nltk-v3
-
+        with: { path: ${{ env.NLTK_DATA }}, key: ${{ runner.os }}-nltk-v3 }
       - name: Install dependencies and NLTK data
         if: steps.cache-nltk.outputs.cache-hit != 'true'
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install beautifulsoup4 ebooklib nltk markdown2 jinja2 scikit-learn mobi
           python -c "import nltk; nltk.download(['punkt', 'stopwords', 'averaged_perceptron_tagger'], download_dir='${{ env.NLTK_DATA }}')"
-
       - name: Install cached dependencies
         if: steps.cache-nltk.outputs.cache-hit == 'true'
-        run: python -m pip install --upgrade pip; pip install beautifulsoup4 ebooklib nltk markdown2 jinja2 scikit-learn mobi
-
+        run: pip install --upgrade pip; pip install beautifulsoup4 ebooklib nltk markdown2 jinja2 scikit-learn mobi
       - name: Run collector script
-        env:
-          NLTK_DATA: ${{ env.NLTK_DATA }}
+        env: { NLTK_DATA: ${{ env.NLTK_DATA }} }
         run: python ./.github/scripts/collector.py
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./docs
-
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: ./docs }
   deploy:
     needs: build
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    permissions: { pages: write, id-token: write }
+    environment: { name: github-pages, url: ${{ steps.deployment.outputs.page_url }} }
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to GitHub Pages
+      - uses: actions/deploy-pages@v4
         id: deployment
-        uses: actions/deploy-pages@v4
