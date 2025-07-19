@@ -12,11 +12,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1: 检出你自己的仓库代码
+      # 步骤1: 【修复】检出你自己的仓库代码，并放到一个叫 'local_repo' 的独立文件夹里
       - name: Checkout local repository
         uses: actions/checkout@v4
+        with:
+          path: local_repo
 
-      # 步骤2: 【核心修复】检出源仓库，并确保拉取LFS大文件
+      # 步骤2: 【修复】检出源仓库，并放到一个叫 'source_repo_1' 的独立文件夹里
       - name: Checkout source repository with LFS
         uses: actions/checkout@v4
         with:
@@ -30,25 +32,21 @@ jobs:
         with:
           python-version: '3.10'
       
-      # 我们不再需要 NLTK 和 scikit-learn，依赖项大大简化
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install ebooklib beautifulsoup4 markdown2 jinja2
 
-      # 运行专家提供的、最简单的 MVP 脚本
+      # 步骤3: 【修复】进入你自己的代码文件夹，然后再运行脚本
       - name: Run collector MVP script
-        run: python ./.github/scripts/collector_mvp.py
-      
-      # 调试步骤依然保留，让我们能看到成果
-      - name: DEBUG - List all generated files
-        if: always()
-        run: ls -R ./docs
+        working-directory: ./local_repo # 关键：切换工作目录到你的代码所在地
+        run: python .github/scripts/collector_mvp.py
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./docs
+          # 上传产物的路径也需要相应更新
+          path: ./local_repo/docs 
 
   deploy:
     needs: build
