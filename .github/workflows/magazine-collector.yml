@@ -14,14 +14,14 @@ jobs:
     env:
       WORKSPACE: ${{ github.workspace }}
     steps:
-      # 步骤1: 检出本地仓库代码（主仓库）
-      - name: Checkout local repository
+      # 步骤1: 检出主仓库（包含脚本和工作流）
+      - name: Checkout main repository
         uses: actions/checkout@v4
         with:
           path: main_repo
           fetch-depth: 0
           
-      # 步骤2: 检出源仓库（包含LFS）
+      # 步骤2: 检出源仓库（包含电子书）
       - name: Checkout source repository with LFS
         uses: actions/checkout@v4
         with:
@@ -30,23 +30,14 @@ jobs:
           lfs: true
           fetch-depth: 0
         
-      # 工作区诊断步骤
-      - name: Debug - Workspace Structure
+      # 脚本存在性验证
+      - name: Verify script existence
         run: |
-          echo "===== 工作区结构诊断 ====="
-          echo "工作区根目录: $WORKSPACE"
-          echo "内容:"
-          ls -la
-          echo ""
-          echo "main_repo目录内容:"
-          ls -la main_repo
-          echo ""
-          echo "main_repo/.github/scripts内容:"
-          ls -la main_repo/.github/scripts || echo "⚠️ 脚本目录不存在"
-          echo ""
-          echo "tree -d结构:"
-          tree -d -L 3 || echo "tree命令不可用"
-          
+          echo "工作区路径: $WORKSPACE"
+          echo "搜索脚本位置:"
+          find $WORKSPACE -name collector_mvp.py -print || echo "找不到脚本"
+          ls -la $WORKSPACE/main_repo/.github/scripts/
+        
       # Python环境设置
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -59,23 +50,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install ebooklib beautifulsoup4 markdown2 jinja2
           
-      # 运行转换脚本
+      # 运行脚本 - 这里是关键修复点
       - name: Run collector script
         run: |
-          # 绝对路径保证执行
-          SCRIPT_PATH="$WORKSPACE/main_repo/.github/scripts/collector.py"
-          
-          if [ -f "$SCRIPT_PATH" ]; then
-            echo "✅ 找到脚本: $SCRIPT_PATH"
-            python "$SCRIPT_PATH"
-          else
-            echo "::error::找不到collector.py脚本"
-            echo "搜索所有位置:"
-            find . -name "*.py"
-            exit 1
-          fi
+          # 直接使用已知的脚本路径
+          python "$WORKSPACE/main_repo/.github/scripts/collector_mvp.py"
         
-      # 上传制品
+      # 上传生成的网站内容
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
