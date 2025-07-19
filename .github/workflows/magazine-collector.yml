@@ -1,8 +1,8 @@
-name: Magazine Article Collector
+name: Global Journals Aggregator
 
 on:
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *' # 每天UTC时间2点 (北京时间早上10点)
   workflow_dispatch:
   push:
     branches:
@@ -19,9 +19,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 只保留唯一一个、绝对可靠的源仓库
-      - name: Clone Source Repository
+      # 【源 1】克隆主仓库
+      - name: Clone Primary Source Repo (Awesome English Ebooks)
         run: git clone --depth 1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo_1
+
+      # 【源 2】【最终修复】克隆一个全新的、经过验证的、可靠的科学期刊仓库
+      - name: Clone Secondary Source Repo (Science Magazines)
+        run: git clone --depth 1 https://github.com/y-avg/Scientific-Magazines.git source_repo_2
 
       - name: Set up Python
         uses: actions/setup-python@v4
