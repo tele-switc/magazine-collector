@@ -2,45 +2,40 @@ name: Magazine Article Collector
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # UTC时间每天凌晨1点运行（北京时间9点）
-  workflow_dispatch:       # 允许手动触发
+    - cron: '0 1 * * *'
+  workflow_dispatch:
   push:
     branches:
-      - main              # 只在main分支推送时触发
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1: 检出本地仓库代码
       - name: Checkout local repository
         uses: actions/checkout@v4
         with:
           path: local_repo
-          fetch-depth: 0  # 获取完整历史记录
-          persist-credentials: false
-          
-      # 步骤2: 检出源仓库（包含LFS文件）
+          fetch-depth: 0
+
+      # 修复后的源仓库检出步骤
       - name: Checkout source repository with LFS
         uses: actions/checkout@v4
         with:
           repository: hehonghui/awesome-english-ebooks
           path: source_repo_1
           lfs: true
-          ref: main       # 确保检出特定分支
-          fetch-depth: 1  # 只获取最新提交
+          lfs-smudge: git-lfs smudge --skip -- %f  # 关键修复
+          fetch-depth: 0
+          timeout-minutes: 15
 
-      # 验证步骤：确认文件路径
-      - name: Validate script location
+      - name: Verify LFS objects
         run: |
-          echo "工作区路径: $GITHUB_WORKSPACE"
-          if [ -f "$GITHUB_WORKSPACE/local_repo/.github/scripts/collector.py" ]; then
-            echo "✅ 脚本文件存在"
-          else
-            echo "❌ 脚本文件不存在！尝试查找"
-            find . -name collector.py -print
-            exit 1
-          fi
+          cd source_repo_1
+          git lfs ls-files
+          git lfs fetch --all
+          echo "验证01_economist目录:"
+          ls -la 01_economist/
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -52,21 +47,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install ebooklib beautifulsoup4 markdown2 jinja2
           
-      # 修改后的关键步骤：使用动态路径执行脚本
       - name: Run collector script
         run: |
-          SCRIPT_PATH=$(find . -path "*/local_repo/.github/scripts/collector.py" -print -quit)
-          if [ -n "$SCRIPT_PATH" ]; then
-            echo "运行脚本: $SCRIPT_PATH"
-            python "$SCRIPT_PATH"
-          else
-            echo "::error::无法找到collector.py脚本"
-            exit 1
-          fi
+          cd local_repo
+          python .github/scripts/collector.py
         
-      - name: List generated files
-        run: ls -R ./docs
-
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
