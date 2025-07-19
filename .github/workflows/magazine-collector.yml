@@ -25,8 +25,12 @@ jobs:
 
       # 【源 2】【最终修复】克隆一个全新的、经过验证的、可靠的科学期刊仓库
       - name: Clone Secondary Source Repo (Science Magazines)
-        run: git clone --depth 1 https://github.com/y-avg/Scientific-Magazines.git source_repo_2
+        run: git clone --depth 1 https://github.com/Read-Magazines/Scientific-American.git source_repo_2
 
+      # 【源 3】【新增】克隆另一个包含多种期刊的备用仓库
+      - name: Clone Tertiary Source Repo (General Magazines)
+        run: git clone --depth 1 https://github.com/Read-Magazines/Newsweek.git source_repo_3
+        
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
