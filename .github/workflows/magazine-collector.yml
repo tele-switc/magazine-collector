@@ -19,18 +19,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 【源 1】克隆主仓库
+      # 【源 1】克隆我们已知可靠的主仓库
       - name: Clone Primary Source Repo (Awesome English Ebooks)
         run: git clone --depth 1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo_1
 
-      # 【源 2】【最终修复】克隆一个全新的、经过验证的、可靠的科学期刊仓库
-      - name: Clone Secondary Source Repo (Science Magazines)
-        run: git clone --depth 1 https://github.com/Read-Magazines/Scientific-American.git source_repo_2
+      # 【源 2】【最终修复】克隆由你找到的、经过验证的、可靠的科学期刊仓库
+      - name: Clone Secondary Source Repo (Scientific American)
+        run: git clone --depth 1 https://github.com/Monkfishare/Scientific_American.git source_repo_2
 
-      # 【源 3】【新增】克隆另一个包含多种期刊的备用仓库
-      - name: Clone Tertiary Source Repo (General Magazines)
-        run: git clone --depth 1 https://github.com/Read-Magazines/Newsweek.git source_repo_3
-        
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
