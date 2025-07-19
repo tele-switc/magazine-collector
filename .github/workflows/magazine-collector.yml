@@ -2,7 +2,7 @@ name: Magazine Article Collector
 
 on:
   schedule:
-    - cron: '0 1 * * *'
+    - cron: '0 1 * * *' # 北京时间早上9点
   workflow_dispatch:
   push:
     branches:
@@ -19,39 +19,45 @@ jobs:
         run: git clone --depth=1 https://github.com/hehonghui/awesome-english-ebooks.git source_repo
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      # 只安装最核心、最稳定的依赖
-      - name: Install dependencies
+      - name: Install dependencies and NLTK data
         run: |
           python -m pip install --upgrade pip
-          pip install beautifulsoup4 ebooklib lxml nltk markdown2 jinja2 scikit-learn
+          pip install beautifulsoup4 ebooklib pdfplumber nltk markdown2 jinja2 scikit-learn
+          # 使用最明确、最可靠的方式下载NLTK数据
+          python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True); nltk.download('averaged_perceptron_tagger', quiet=True)"
 
-      - name: Run collector script
+      # 【最终保险措施】在运行脚本前，确保 docs 文件夹一定存在
+      - name: Ensure docs directory exists
+        run: mkdir -p docs
+
+      - name: Run magazine collector script
         run: python ./.github/scripts/collector.py
-        
-      - name: DEBUG - List generated files
+
+      - name: DEBUG - List all generated files
         if: always()
         run: ls -R
 
+      # 【官方部署步骤 1】将生成的 docs 文件夹打包成一个 "artifact"
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./docs
 
   deploy:
-    runs-on: ubuntu-latest
     needs: build
-    timeout-minutes: 20 # 保留延长的超时时间
     permissions:
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
     steps:
+      # 【官方部署步骤 2】从 "artifact" 部署到 GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
