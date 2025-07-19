@@ -2,11 +2,15 @@ name: Magazine Article Collector
 
 on:
   schedule:
-    - cron: '0 1 * * *' # 北京时间早上9点
+    - cron: '0 1 * * *'
   workflow_dispatch:
   push:
     branches:
       - main
+
+env:
+  PYTHON_VERSION: '3.10'
+  NLTK_DATA: ${{ github.workspace }}/.cache/nltk_data
 
 jobs:
   build:
@@ -21,27 +25,37 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache NLTK data
+        id: cache-nltk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NLTK_DATA }}
+          key: ${{ runner.os }}-nltk-v1
 
       - name: Install dependencies and NLTK data
+        if: steps.cache-nltk.outputs.cache-hit != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install beautifulsoup4 ebooklib pdfplumber nltk markdown2 jinja2 scikit-learn
-          # 使用最明确、最可靠的方式下载NLTK数据
-          python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('stopwords', quiet=True); nltk.download('averaged_perceptron_tagger', quiet=True)"
+          python -c "import nltk; nltk.download(['punkt', 'stopwords', 'averaged_perceptron_tagger'], download_dir='${{ env.NLTK_DATA }}')"
+
+      - name: Install dependencies from cache
+        if: steps.cache-nltk.outputs.cache-hit == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install beautifulsoup4 ebooklib pdfplumber nltk markdown2 jinja2 scikit-learn
 
       # 【最终保险措施】在运行脚本前，确保 docs 文件夹一定存在
       - name: Ensure docs directory exists
         run: mkdir -p docs
 
       - name: Run magazine collector script
+        env:
+          NLTK_DATA: ${{ env.NLTK_DATA }}
         run: python ./.github/scripts/collector.py
 
-      - name: DEBUG - List all generated files
-        if: always()
-        run: ls -R
-
-      # 【官方部署步骤 1】将生成的 docs 文件夹打包成一个 "artifact"
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -57,7 +71,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      # 【官方部署步骤 2】从 "artifact" 部署到 GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
