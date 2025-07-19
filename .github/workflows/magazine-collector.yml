@@ -12,20 +12,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1: 【修复】检出你自己的仓库代码，并放到一个叫 'local_repo' 的独立文件夹里
+      # 步骤1: 检出本地仓库代码（使用隔离目录）
       - name: Checkout local repository
         uses: actions/checkout@v4
         with:
           path: local_repo
+          fetch-depth: 0  # 获取完整历史
 
-      # 步骤2: 【修复】检出源仓库，并放到一个叫 'source_repo_1' 的独立文件夹里
+      # 步骤2: 检出源仓库并拉取LFS大文件
       - name: Checkout source repository with LFS
         uses: actions/checkout@v4
         with:
           repository: hehonghui/awesome-english-ebooks
           path: source_repo_1
           lfs: true
-          fetch-depth: 1
+          fetch-depth: 1  # 优化性能
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -36,17 +37,30 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install ebooklib beautifulsoup4 markdown2 jinja2
+          
+      # 关键修复：添加工作目录设置和调试步骤
+      - name: Debug - 列出工作区结构
+        run: |
+          echo "工作区根目录内容:"
+          ls -la
+          echo "local_repo目录内容:"
+          ls -la local_repo/.github/scripts
+          echo "source_repo_1目录内容:"
+          ls -la source_repo_1/01_economist
 
-      # 步骤3: 【修复】进入你自己的代码文件夹，然后再运行脚本
-      - name: Run collector MVP script
-        working-directory: ./local_repo # 关键：切换工作目录到你的代码所在地
-        run: python .github/scripts/collector_mvp.py
+      # 运行脚本（指定工作目录）
+      - name: Run collector script
+        working-directory: ${{ github.workspace }}/local_repo
+        run: python .github/scripts/collector.py
+        
+      # 生成文档
+      - name: DEBUG - List all generated files
+        run: ls -R ./docs
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # 上传产物的路径也需要相应更新
-          path: ./local_repo/docs 
+          path: ./docs
 
   deploy:
     needs: build
