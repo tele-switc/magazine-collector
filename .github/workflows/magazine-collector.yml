@@ -2,31 +2,45 @@ name: Magazine Article Collector
 
 on:
   schedule:
-    - cron: '0 1 * * *'
-  workflow_dispatch:
+    - cron: '0 1 * * *'  # UTC时间每天凌晨1点运行（北京时间9点）
+  workflow_dispatch:       # 允许手动触发
   push:
     branches:
-      - main
+      - main              # 只在main分支推送时触发
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1: 检出本地仓库代码（使用隔离目录）
+      # 步骤1: 检出本地仓库代码
       - name: Checkout local repository
         uses: actions/checkout@v4
         with:
           path: local_repo
-          fetch-depth: 0  # 获取完整历史
-
-      # 步骤2: 检出源仓库并拉取LFS大文件
+          fetch-depth: 0  # 获取完整历史记录
+          persist-credentials: false
+          
+      # 步骤2: 检出源仓库（包含LFS文件）
       - name: Checkout source repository with LFS
         uses: actions/checkout@v4
         with:
           repository: hehonghui/awesome-english-ebooks
           path: source_repo_1
           lfs: true
-          fetch-depth: 1  # 优化性能
+          ref: main       # 确保检出特定分支
+          fetch-depth: 1  # 只获取最新提交
+
+      # 验证步骤：确认文件路径
+      - name: Validate script location
+        run: |
+          echo "工作区路径: $GITHUB_WORKSPACE"
+          if [ -f "$GITHUB_WORKSPACE/local_repo/.github/scripts/collector.py" ]; then
+            echo "✅ 脚本文件存在"
+          else
+            echo "❌ 脚本文件不存在！尝试查找"
+            find . -name collector.py -print
+            exit 1
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -38,23 +52,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install ebooklib beautifulsoup4 markdown2 jinja2
           
-      # 关键修复：添加工作目录设置和调试步骤
-      - name: Debug - 列出工作区结构
-        run: |
-          echo "工作区根目录内容:"
-          ls -la
-          echo "local_repo目录内容:"
-          ls -la local_repo/.github/scripts
-          echo "source_repo_1目录内容:"
-          ls -la source_repo_1/01_economist
-
-      # 运行脚本（指定工作目录）
+      # 修改后的关键步骤：使用动态路径执行脚本
       - name: Run collector script
-        working-directory: ${{ github.workspace }}/local_repo
-        run: python .github/scripts/collector.py
+        run: |
+          SCRIPT_PATH=$(find . -path "*/local_repo/.github/scripts/collector.py" -print -quit)
+          if [ -n "$SCRIPT_PATH" ]; then
+            echo "运行脚本: $SCRIPT_PATH"
+            python "$SCRIPT_PATH"
+          else
+            echo "::error::无法找到collector.py脚本"
+            exit 1
+          fi
         
-      # 生成文档
-      - name: DEBUG - List all generated files
+      - name: List generated files
         run: ls -R ./docs
 
       - name: Upload artifact
