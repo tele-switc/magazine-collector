@@ -12,20 +12,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1: 检出你自己的仓库代码到 'local_repo'
+      # 步骤1: 检出你自己的仓库代码到 'local_repo' 文件夹
       - name: Checkout local repository
         uses: actions/checkout@v4
         with:
           path: local_repo
 
-      # 步骤2: 检出源仓库到 'source_repo_1'
+      # 步骤2: 检出源仓库到 'source_repo_1' 文件夹
       - name: Checkout source repository with LFS
         uses: actions/checkout@v4
         with:
           repository: hehonghui/awesome-english-ebooks
           path: source_repo_1
           lfs: true
-          fetch-depth: 1
+          fetch-depth: 1 # 拉取最新即可，LFS文件会完整下载
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -35,19 +35,20 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ebooklib beautifulsoup4 markdown2 jinja2
+          pip install ebooklib beautifulsoup4 markdown2 jinja2 lxml
 
-      # 步骤3: 从根目录运行脚本，确保路径正确
-      - name: Run collector MVP script
-        # 将 GITHUB_WORKSPACE 注入到脚本的环境变量中
+      # 步骤3: 从工作区根目录运行脚本，使用明确的相对路径
+      - name: Run collector script
         env:
+          # 将工作区根目录的绝对路径注入到环境变量中
           GITHUB_WORKSPACE: ${{ github.workspace }}
-        run: python local_repo/.github/scripts/collector_mvp.py
+        run: python local_repo/.github/scripts/collector.py
 
+      # 步骤4: 上传产物，使用明确的相对路径
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./local_repo/docs
+          path: local_repo/docs
 
   deploy:
     needs: build
