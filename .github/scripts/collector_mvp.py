@@ -6,91 +6,82 @@ from ebooklib import epub
 from bs4 import BeautifulSoup
 import markdown2
 
-# 配置日志
+# 设置日志记录
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', stream=sys.stdout)
 
-# 【专家方案】通过环境变量获取工作区根目录，这是最可靠的方法
-GITHUB_WORKSPACE = os.getenv('GITHUB_WORKSPACE')
-if not GITHUB_WORKSPACE:
-    logging.error("错误: GITHUB_WORKSPACE 环境变量未设置。无法继续。")
+# --- 路径管理：从环境变量中获取 ---
+SOURCE_REPO_PATH_STR = os.getenv('SOURCE_REPO_PATH')
+OUTPUT_PATH_STR = os.getenv('OUTPUT_PATH')
+
+if not SOURCE_REPO_PATH_STR or not OUTPUT_PATH_STR:
+    logging.error("环境变量 'SOURCE_REPO_PATH' 或 'OUTPUT_PATH' 未设置。")
     sys.exit(1)
 
-BASE_DIR = Path(GITHUB_WORKSPACE)
-logging.info(f"[*] 工作区基础目录 (BASE_DIR): {BASE_DIR}")
+SRC_BASE = Path(SOURCE_REPO_PATH_STR)
+DST_BASE = Path(OUTPUT_PATH_STR)
+SRC = SRC_BASE / "01_economist"
+DST_ARTICLES = DST_BASE / "articles"
 
-# 基于绝对路径定义源和目标
-SRC = BASE_DIR / "source_repo_1/01_economist"
-# 输出路径也使用绝对路径
-DST_ARTICLES = BASE_DIR / "local_repo/docs/articles"
-DST_SITE = BASE_DIR / "local_repo/docs"
-
+logging.info(f"源文件目录: {SRC}")
+logging.info(f"文章输出目录: {DST_ARTICLES}")
+logging.info(f"静态网站根目录: {DST_BASE}")
 
 def epub_to_md(epub_path: Path, out_dir: Path):
-    """将单个 EPUB 文件转换为 Markdown 文件。"""
+    """将单个 EPUB 文件转换为多个 Markdown 文章"""
     try:
+        if not epub_path.is_file(): return
         book = epub.read_epub(epub_path)
-        md_parts = [BeautifulSoup(item.get_body_content(), 'lxml').get_text('\n') for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)]
-        md_text = '\n\n'.join(md_parts)
-        out_file = out_dir / (epub_path.stem + '.md')
-        out_file.write_text(md_text, encoding='utf-8')
-        logging.info(f'✔︎ 转换成功: {epub_path.name}')
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for item in book.get_items_of_type(epub.EpubHtml):
+            content = item.get_content()
+            soup = BeautifulSoup(content, 'html.parser')
+            title_tag = soup.find('h1') or soup.find('h2')
+            file_name_base = "".join(x for x in (title_tag.text if title_tag else Path(item.get_name()).stem) if x.isalnum() or x in " _-").strip()
+            md_content = markdown2.markdown(str(soup), extras=["metadata", "fenced-code-blocks"])
+            md_file_path = out_dir / f"{file_name_base}.md"
+            md_file_path.write_text(md_content, encoding='utf-8')
+            logging.info(f"已转换 '{epub_path.name}' 中的 '{item.get_name()}'")
     except Exception as e:
-        logging.error(f'✘ 处理失败 {epub_path.name}: {e}')
+        logging.error(f"处理 EPUB 文件 '{epub_path.name}' 时发生错误: {e}")
 
 def generate_website(articles_dir: Path, output_dir: Path):
-    """根据生成的 .md 文件创建一个简单的 HTML 网站。"""
-    if not articles_dir.is_dir():
-        logging.warning(f"文章目录 {articles_dir} 不存在，无法生成网站。")
-        # 【最终保险】即使没有文章，也创建一个空的 index.html
-        output_dir.mkdir(parents=True, exist_ok=True)
+    """根据 Markdown 文章生成一个简单的静态网站"""
+    if not articles_dir.exists():
+        logging.warning("文章目录不存在，跳过网站生成。")
         (output_dir / "index.html").write_text("<h1>暂无文章</h1>", encoding='utf-8')
         return
 
-    articles = [{'title': md_file.stem, 'url': f"articles/{md_file.stem}.html"} for md_file in articles_dir.glob('*.md')]
-    
-    # 为每篇文章生成一个单独的 HTML 页面
-    for md_file in articles_dir.glob('*.md'):
-        html_article_path = output_dir / "articles" / f"{md_file.stem}.html"
-        html_article_path.parent.mkdir(exist_ok=True)
-        html_content = f"<!DOCTYPE html><html><head><title>{md_file.stem}</title></head><body><h1>{md_file.stem}</h1>"
-        html_content += markdown2.markdown(md_file.read_text(encoding='utf-8'))
-        html_content += '<br/><a href="../index.html">返回列表</a></body></html>'
-        html_article_path.write_text(html_content, encoding='utf-8')
-
-    # 生成首页
-    index_content = "<html><head><title>Articles</title></head><body><h1>文章列表</h1><ul>"
-    for article in sorted(articles, key=lambda x: x['title']):
-        index_content += f'<li><a href="{article["url"]}">{article["title"]}</a></li>'
-    index_content += "</ul></body></html>"
-    (output_dir / "index.html").write_text(index_content, encoding='utf-8')
-    logging.info(f'✔︎ 生成 index.html, 包含 {len(articles)} 篇文章。')
+    index_html_path = output_dir / "index.html"
+    html_content = "<html><body><h1>文章列表</h1><ul>"
+    article_files = sorted(list(articles_dir.rglob("*.md")))
+    if not article_files:
+        html_content += "<li>No articles found.</li>"
+    else:
+        for md_file in article_files:
+            relative_path = md_file.relative_to(output_dir)
+            html_content += f'<li><a href="{relative_path}">{md_file.stem}</a></li>\n'
+    html_content += "</ul></body></html>"
+    index_html_path.write_text(html_content, encoding='utf-8')
+    logging.info(f"网站索引页已生成: {index_html_path}")
 
 def main():
-    """主函数"""
-    # 【防御性编程】在操作前验证路径
-    if not SRC.is_dir():
-        logging.error(f"❌ 源目录不存在: {SRC}")
-        logging.info("列出工作区根目录内容以供调试:")
-        for item in BASE_DIR.iterdir():
-            logging.info(f"  - {item.name}")
-        # 即使源目录不存在，也继续执行以生成一个空的网站，避免 Upload artifact 失败
-        generate_website(DST_ARTICLES, DST_SITE)
-        sys.exit(0) # 正常退出
-        
+    """主执行函数"""
+    logging.info("--- 开始执行收集器脚本 ---")
     DST_ARTICLES.mkdir(parents=True, exist_ok=True)
+    if not SRC.exists() or not SRC.is_dir():
+        logging.error(f"源目录 '{SRC}' 不存在或不是一个目录。")
+        sys.exit(1)
 
-    files = list(SRC.glob('*.epub'))
-    logging.info(f'在 {SRC} 中找到 {len(files)} 个 EPUB 文件。')
-    
-    if not files:
-        logging.warning("在源目录中未找到 .epub 文件。")
-
-    for f in files:
-        epub_to_md(f, DST_ARTICLES)
-    
-    generate_website(DST_ARTICLES, DST_SITE)
-    
-    logging.info("✅ 脚本执行完毕。")
+    epub_files = list(SRC.glob("*.epub"))
+    if not epub_files:
+        logging.warning(f"在 '{SRC}' 中未找到 EPUB 文件。")
+    else:
+        for epub_file in epub_files:
+            magazine_name = epub_file.stem
+            article_output_dir = DST_ARTICLES / magazine_name
+            epub_to_md(epub_file, article_output_dir)
+    generate_website(DST_ARTICLES, DST_BASE)
+    logging.info("--- 收集器脚本执行完毕 ---")
 
 if __name__ == '__main__':
     main()
