@@ -12,13 +12,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1: 【修复】检出你自己的仓库代码，并放到一个叫 'local_repo' 的独立文件夹里
+      # 步骤1: 检出你自己的仓库代码到 'local_repo'
       - name: Checkout local repository
         uses: actions/checkout@v4
         with:
           path: local_repo
 
-      # 步骤2: 【修复】检出源仓库，并放到一个叫 'source_repo_1' 的独立文件夹里
+      # 步骤2: 检出源仓库到 'source_repo_1'
       - name: Checkout source repository with LFS
         uses: actions/checkout@v4
         with:
@@ -37,16 +37,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install ebooklib beautifulsoup4 markdown2 jinja2
 
-      # 步骤3: 【修复】进入你自己的代码文件夹，然后再运行脚本
+      # 步骤3: 从根目录运行脚本，确保路径正确
       - name: Run collector MVP script
-        working-directory: ./local_repo # 关键：切换工作目录到你的代码所在地
-        run: python .github/scripts/collector_mvp.py
+        # 将 GITHUB_WORKSPACE 注入到脚本的环境变量中
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: python local_repo/.github/scripts/collector_mvp.py
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # 上传产物的路径也需要相应更新
-          path: ./local_repo/docs 
+          path: ./local_repo/docs
 
   deploy:
     needs: build
